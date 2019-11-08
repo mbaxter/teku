@@ -73,8 +73,6 @@ public abstract class GossipTopicHandler<T extends SimpleOffsetSerializable>
       return;
     }
 
-    // Post and re-gossip data on successful processing
-    gossip(bytes);
     eventBus.post(data);
   }
 
@@ -91,7 +89,7 @@ public abstract class GossipTopicHandler<T extends SimpleOffsetSerializable>
   protected abstract boolean validateData(T dataObject);
 
   @VisibleForTesting
-  public final void gossip(final T data) {
+  final void gossip(final T data) {
     final Bytes bytes = SimpleOffsetSerializer.serialize(data);
     if (!processedMessages.add(bytes)) {
       // We've already gossiped this data
