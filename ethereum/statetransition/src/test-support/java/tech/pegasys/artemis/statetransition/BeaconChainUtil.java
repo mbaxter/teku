@@ -52,7 +52,7 @@ public class BeaconChainUtil {
       final List<BLSKeyPair> validatorKeys, final ChainStorageClient chainStorageClient) {
     this.validatorKeys = validatorKeys;
     this.storageClient = chainStorageClient;
-    initializeStorage(chainStorageClient);
+    initializeStorage(storageClient, validatorKeys);
   }
 
   public static BeaconChainUtil create(
@@ -61,13 +61,14 @@ public class BeaconChainUtil {
     return new BeaconChainUtil(validatorKeys, storageClient);
   }
 
+  public static BeaconChainUtil create(
+      List<BLSKeyPair> validatorKeys, final ChainStorageClient storageClient) {
+    return new BeaconChainUtil(validatorKeys, storageClient);
+  }
+
   public static void initializeStorage(
       final ChainStorageClient chainStorageClient, final List<BLSKeyPair> validatorKeys) {
     StartupUtil.setupInitialState(chainStorageClient, 0, null, validatorKeys);
-  }
-
-  public void initializeStorage(final ChainStorageClient chainStorageClient) {
-    initializeStorage(chainStorageClient, validatorKeys);
   }
 
   public BeaconBlock createBlockAtSlot(final UnsignedLong slot)
