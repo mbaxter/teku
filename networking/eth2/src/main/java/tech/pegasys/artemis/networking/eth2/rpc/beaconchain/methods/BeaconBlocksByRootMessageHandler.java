@@ -17,8 +17,8 @@ import org.apache.logging.log4j.LogManager;
 import tech.pegasys.artemis.datastructures.blocks.BeaconBlock;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.eth2.rpc.core.LocalMessageHandler;
-import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 
 public class BeaconBlocksByRootMessageHandler

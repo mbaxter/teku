@@ -31,17 +31,18 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.jetbrains.annotations.NotNull;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.PeerLookup;
 import tech.pegasys.artemis.networking.p2p.network.PeerHandler;
 import tech.pegasys.artemis.networking.p2p.peer.NodeId;
 import tech.pegasys.artemis.networking.p2p.peer.Peer;
 
-public class PeerManager implements ConnectionHandler {
+public class PeerManager implements ConnectionHandler, PeerLookup {
   private static final Logger LOG = LogManager.getLogger();
 
   private final ScheduledExecutorService scheduler;
   private static final long RECONNECT_TIMEOUT = 5000;
 
-  private ConcurrentHashMap<NodeId, Peer> connectedPeerMap = new ConcurrentHashMap<>();
+  private ConcurrentHashMap<NodeId, LibP2PPeer> connectedPeerMap = new ConcurrentHashMap<>();
   private final List<PeerHandler> peerHandlers;
 
   public PeerManager(
@@ -55,7 +56,7 @@ public class PeerManager implements ConnectionHandler {
 
   @Override
   public void handleConnection(@NotNull final Connection connection) {
-    Peer peer = new LibP2PPeer(connection);
+    LibP2PPeer peer = new LibP2PPeer(connection);
     onConnectedPeer(peer);
     connection.closeFuture().thenRun(() -> onDisconnectedPeer(peer));
   }
@@ -95,7 +96,7 @@ public class PeerManager implements ConnectionHandler {
     return Optional.ofNullable(connectedPeerMap.get(id));
   }
 
-  private void onConnectedPeer(Peer peer) {
+  private void onConnectedPeer(LibP2PPeer peer) {
     final boolean wasAdded = connectedPeerMap.putIfAbsent(peer.getId(), peer) == null;
     if (wasAdded) {
       STDOUT.log(Level.DEBUG, "onConnectedPeer() " + peer.getId());
@@ -103,18 +104,23 @@ public class PeerManager implements ConnectionHandler {
     }
   }
 
-  private void onDisconnectedPeer(Peer peer) {
+  private void onDisconnectedPeer(LibP2PPeer peer) {
     if (connectedPeerMap.remove(peer.getId()) != null) {
       STDOUT.log(Level.DEBUG, "Peer disconnected: " + peer.getId());
       peerHandlers.forEach(h -> h.onDisconnect(peer));
     }
   }
 
-  public Stream<Peer> streamPeers() {
+  public Stream<LibP2PPeer> streamPeers() {
     return connectedPeerMap.values().stream();
   }
 
   public int getPeerCount() {
     return connectedPeerMap.size();
+  }
+
+  @Override
+  public LibP2PPeer getConnectedPeer(final NodeId nodeId) {
+    return connectedPeerMap.get(nodeId);
   }
 }

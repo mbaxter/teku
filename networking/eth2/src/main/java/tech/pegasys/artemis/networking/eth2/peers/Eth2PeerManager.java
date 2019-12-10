@@ -28,7 +28,7 @@ import tech.pegasys.artemis.networking.p2p.peer.NodeId;
 import tech.pegasys.artemis.networking.p2p.peer.Peer;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 
-public class Eth2PeerManager implements PeerLookup, PeerHandler {
+public class Eth2PeerManager implements PeerHandler {
   private static final Logger LOG = LogManager.getLogger();
   private final StatusMessageFactory statusMessageFactory;
 

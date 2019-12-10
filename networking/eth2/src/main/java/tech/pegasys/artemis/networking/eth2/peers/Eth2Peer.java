@@ -27,9 +27,9 @@ import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.BeaconChainMethods;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
-import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseStream;
-import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseStream.ResponseListener;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMethod;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.ResponseStream;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseListener;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
 import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMethods;
 import tech.pegasys.artemis.networking.p2p.peer.DelegatingPeer;
 import tech.pegasys.artemis.networking.p2p.peer.Peer;
@@ -97,7 +97,7 @@ public class Eth2Peer extends DelegatingPeer implements Peer {
   }
 
   private <I extends RpcRequest, O> CompletableFuture<Void> requestStream(
-      final RpcMethod<I, O> method, I request, final ResponseStream.ResponseListener<O> listener) {
+      final RpcMethod<I, O> method, I request, final ResponseListener<O> listener) {
     return sendRequest(method, request)
         .thenCompose(responseStream -> responseStream.expectMultipleResponses(listener));
   }

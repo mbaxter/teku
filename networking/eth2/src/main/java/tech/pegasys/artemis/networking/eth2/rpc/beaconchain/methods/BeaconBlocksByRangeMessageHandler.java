@@ -22,9 +22,10 @@ import org.apache.logging.log4j.LogManager;
 import tech.pegasys.artemis.datastructures.blocks.BeaconBlock;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.eth2.rpc.core.LocalMessageHandler;
-import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseCallback;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 import tech.pegasys.artemis.storage.Store;
 
@@ -52,7 +53,7 @@ public class BeaconBlocksByRangeMessageHandler
         message.getStep());
     try {
       if (message.getStep().compareTo(ONE) < 0) {
-        callback.completeWithError(RpcException.INVALID_STEP);
+        callback.completeWithError(RpcExceptions.INVALID_STEP);
         return;
       }
       sendMatchingBlocks(message, callback);
@@ -75,7 +76,7 @@ public class BeaconBlocksByRangeMessageHandler
     final UnsignedLong bestSlot = storageClient.getBestSlot();
     if (bestSlot == null) {
       LOG.error("No best slot present despite having at least one canonical block");
-      throw RpcException.SERVER_ERROR;
+      throw RpcExceptions.SERVER_ERROR;
     }
 
     UnsignedLong remainingBlocks = message.getCount();

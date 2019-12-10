@@ -22,9 +22,26 @@ import java.util.OptionalInt;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.BeaconBlocksByRootRequestMessageEncoder;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.SimpleOffsetSszEncoder;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.StringSszEncoder;
+import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 
 public class LengthPrefixedEncoding implements RpcEncoding {
+  RpcEncoding SSZ =
+    new LengthPrefixedEncoding(
+      "ssz",
+      RpcPayloadEncoders.builder()
+        .withEncoder(
+          BeaconBlocksByRootRequestMessage.class,
+          new BeaconBlocksByRootRequestMessageEncoder())
+        .withEncoder(String.class, new StringSszEncoder())
+        .defaultEncoderProvider(SimpleOffsetSszEncoder::new)
+        .build());
+
   private static final Logger LOG = LogManager.getLogger();
   private static final int MAX_CHUNK_SIZE = 1048576;
   // Any protobuf length requiring more bytes than this will also be bigger.
@@ -64,12 +81,12 @@ public class LengthPrefixedEncoding implements RpcEncoding {
         expectedLength = in.readRawVarint32();
       } catch (final InvalidProtocolBufferException e) {
         LOG.trace("Invalid length prefix", e);
-        throw RpcException.MALFORMED_REQUEST_ERROR;
+        throw RpcExceptions.MALFORMED_REQUEST_ERROR;
       }
 
       if (expectedLength > MAX_CHUNK_SIZE) {
         LOG.trace("Rejecting message as length is too long");
-        throw RpcException.CHUNK_TOO_LONG_ERROR;
+        throw RpcExceptions.CHUNK_TOO_LONG_ERROR;
       }
 
       final Bytes payload;
@@ -77,18 +94,18 @@ public class LengthPrefixedEncoding implements RpcEncoding {
         payload = Bytes.wrap(in.readRawBytes(expectedLength));
       } catch (final InvalidProtocolBufferException e) {
         LOG.trace("Failed to read message data", e);
-        throw RpcException.INCORRECT_LENGTH_ERROR;
+        throw RpcExceptions.INCORRECT_LENGTH_ERROR;
       }
 
       if (!in.isAtEnd()) {
         LOG.trace("Rejecting message because actual message length exceeds specified length");
-        throw RpcException.INCORRECT_LENGTH_ERROR;
+        throw RpcExceptions.INCORRECT_LENGTH_ERROR;
       }
 
       return parser.decode(payload);
     } catch (IOException e) {
       LOG.error("Unexpected error while processing message: " + message, e);
-      throw RpcException.SERVER_ERROR;
+      throw RpcExceptions.SERVER_ERROR;
     }
   }
 
@@ -108,7 +125,7 @@ public class LengthPrefixedEncoding implements RpcEncoding {
     try {
       return OptionalInt.of(in.readRawVarint32() + prefixLength);
     } catch (final IOException e) {
-      throw RpcException.MALFORMED_MESSAGE_LENGTH_ERROR;
+      throw RpcExceptions.MALFORMED_MESSAGE_LENGTH_ERROR;
     }
   }
 
@@ -116,7 +133,7 @@ public class LengthPrefixedEncoding implements RpcEncoding {
   private OptionalInt getLengthPrefixSize(final Bytes message) throws RpcException {
     for (int i = 0; i < message.size() && i <= MAXIMUM_VARINT_LENGTH; i++) {
       if (i >= MAXIMUM_VARINT_LENGTH) {
-        throw RpcException.CHUNK_TOO_LONG_ERROR;
+        throw RpcExceptions.CHUNK_TOO_LONG_ERROR;
       }
       if ((message.get(i) & 0x80) == 0) {
         return OptionalInt.of(i + 1);

@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 
 public class MessageBuffer {
 

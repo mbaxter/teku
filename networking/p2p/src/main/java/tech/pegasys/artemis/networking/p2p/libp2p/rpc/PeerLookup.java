@@ -11,10 +11,11 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
 
-import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
+import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PPeer;
+import tech.pegasys.artemis.networking.p2p.peer.NodeId;
 
-public interface LocalMessageHandler<I, O> {
-  void onIncomingMessage(Eth2Peer peer, I message, ResponseCallback<O> callback);
+public interface PeerLookup {
+  LibP2PPeer getConnectedPeer(NodeId nodeId);
 }

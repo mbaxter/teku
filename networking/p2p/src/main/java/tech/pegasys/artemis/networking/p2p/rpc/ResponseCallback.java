@@ -11,10 +11,14 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.peers;
+package tech.pegasys.artemis.networking.p2p.rpc;
 
-import tech.pegasys.artemis.networking.p2p.peer.NodeId;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 
-public interface PeerLookup {
-  Eth2Peer getConnectedPeer(NodeId nodeId);
+public interface ResponseCallback<T> {
+  void respond(T data);
+
+  void completeSuccessfully();
+
+  void completeWithError(RpcException error);
 }

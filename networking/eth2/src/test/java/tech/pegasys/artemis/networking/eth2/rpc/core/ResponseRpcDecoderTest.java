@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 
 class ResponseRpcDecoderTest extends RpcDecoderTestBase {
   private static final Bytes SUCCESS_CODE = Bytes.of(0);
@@ -121,7 +122,7 @@ class ResponseRpcDecoderTest extends RpcDecoderTestBase {
         buffer(SUCCESS_CODE, LENGTH_PREFIX, MESSAGE_DATA, Bytes.fromHexString("0x1234")));
     verify(callback).accept(MESSAGE);
 
-    assertThatThrownBy(codec::close).isEqualTo(RpcException.INCORRECT_LENGTH_ERROR);
+    assertThatThrownBy(codec::close).isEqualTo(RpcExceptions.INCORRECT_LENGTH_ERROR);
   }
 
   @Test

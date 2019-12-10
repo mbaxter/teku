@@ -11,10 +11,10 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
 
 import java.util.Objects;
-import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
+import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 
 public class RpcMethod<I, O> {
 

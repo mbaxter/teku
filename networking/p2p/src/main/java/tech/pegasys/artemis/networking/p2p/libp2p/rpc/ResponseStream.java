@@ -11,13 +11,16 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core.encodings;
+package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
 
-import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import java.util.concurrent.CompletableFuture;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseListener;
 
-public interface RpcPayloadEncoder<T> {
-  Bytes encode(T message);
+public interface ResponseStream<O> {
+  CompletableFuture<O> expectSingleResponse();
 
-  T decode(Bytes message) throws RpcException;
+  CompletableFuture<Void> expectNoResponse();
+
+  CompletableFuture<Void> expectMultipleResponses(ResponseListener<O> listener);
+
 }

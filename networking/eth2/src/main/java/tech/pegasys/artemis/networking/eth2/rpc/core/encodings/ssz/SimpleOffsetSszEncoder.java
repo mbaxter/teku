@@ -18,7 +18,8 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.ssz.InvalidSSZTypeException;
 import tech.pegasys.artemis.datastructures.util.SimpleOffsetSerializer;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcPayloadEncoder;
 import tech.pegasys.artemis.util.sos.SimpleOffsetSerializable;
 
@@ -43,7 +44,7 @@ public class SimpleOffsetSszEncoder<T> implements RpcPayloadEncoder<T> {
       if (LOG.isTraceEnabled()) {
         LOG.trace("Failed to parse network message: " + message, e);
       }
-      throw RpcException.MALFORMED_REQUEST_ERROR;
+      throw RpcExceptions.MALFORMED_REQUEST_ERROR;
     }
   }
 }

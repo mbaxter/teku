@@ -11,18 +11,10 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.rpc;
 
-import java.util.concurrent.CompletableFuture;
+import tech.pegasys.artemis.networking.p2p.peer.Peer;
 
-public interface ResponseStream<O> {
-  CompletableFuture<O> expectSingleResponse();
-
-  CompletableFuture<Void> expectNoResponse();
-
-  CompletableFuture<Void> expectMultipleResponses(ResponseListener<O> listener);
-
-  interface ResponseListener<O> {
-    void onResponse(O response);
-  }
+public interface LocalMessageHandler<I, O> {
+  void onIncomingMessage(Peer peer, I message, ResponseCallback<O> callback);
 }

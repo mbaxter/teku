@@ -29,9 +29,10 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
-import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
+import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcPayloadEncoder;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.BeaconBlocksByRootRequestMessageEncoder;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
 
 public class RpcDecoderTestBase {
 
@@ -48,7 +49,7 @@ public class RpcDecoderTestBase {
       getLengthPrefix(ERROR_MESSAGE_DATA.size());
 
   protected static final RpcMethod<
-          BeaconBlocksByRootRequestMessage, BeaconBlocksByRootRequestMessage>
+            BeaconBlocksByRootRequestMessage, BeaconBlocksByRootRequestMessage>
       METHOD =
           new RpcMethod<>(
               "",

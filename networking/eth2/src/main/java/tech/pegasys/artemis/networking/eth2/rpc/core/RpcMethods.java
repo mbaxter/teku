@@ -21,6 +21,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.ResponseStream;
 
 public class RpcMethods {
 

@@ -11,13 +11,14 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.base.Preconditions;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseListener;
 
 public class ResponseStreamImpl<O> implements ResponseStream<O> {
 

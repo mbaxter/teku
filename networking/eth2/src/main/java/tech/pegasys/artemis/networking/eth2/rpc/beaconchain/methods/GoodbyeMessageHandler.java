@@ -22,8 +22,8 @@ import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.GoodbyeMessage;
 import tech.pegasys.artemis.metrics.ArtemisMetricCategory;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.eth2.rpc.core.LocalMessageHandler;
-import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
 
 public class GoodbyeMessageHandler implements LocalMessageHandler<GoodbyeMessage, GoodbyeMessage> {
 

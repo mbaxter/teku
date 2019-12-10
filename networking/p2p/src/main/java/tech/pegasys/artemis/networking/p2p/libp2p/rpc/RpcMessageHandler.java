@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
 
 import static tech.pegasys.artemis.util.alogger.ALogger.STDOUT;
 
@@ -24,18 +24,22 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.jetbrains.annotations.NotNull;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
-import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.eth2.peers.PeerLookup;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMessageHandler.Controller;
+import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PPeer;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler.Controller;
 import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PNodeId;
 import tech.pegasys.artemis.networking.p2p.network.Protocol;
 import tech.pegasys.artemis.networking.p2p.peer.NodeId;
+import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcEncoder;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 
 public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
     implements Protocol<Controller<TRequest, ResponseStream<TResponse>>> {
@@ -45,16 +49,19 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
   private final PeerLookup peerLookup;
   private final LocalMessageHandler<TRequest, TResponse> localMessageHandler;
   private final RpcEncoder rpcEncoder;
+  private final Supplier<RpcException> serverErrorSupplier;
   private boolean closeNotification = false;
 
   public RpcMessageHandler(
       RpcMethod<TRequest, TResponse> method,
       PeerLookup peerLookup,
-      LocalMessageHandler<TRequest, TResponse> localMessageHandler) {
+      LocalMessageHandler<TRequest, TResponse> localMessageHandler,
+      Supplier<RpcException> serverErrorSupplier) {
     this.method = method;
     this.peerLookup = peerLookup;
     this.localMessageHandler = localMessageHandler;
     this.rpcEncoder = new RpcEncoder(method.getEncoding());
+    this.serverErrorSupplier = serverErrorSupplier;
   }
 
   @SuppressWarnings("unchecked")
@@ -72,11 +79,11 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
       Connection connection, TRequest request, ResponseCallback<TResponse> callback) {
     try {
       final NodeId nodeId = new LibP2PNodeId(connection.getSecureSession().getRemoteId());
-      final Eth2Peer peer = peerLookup.getConnectedPeer(nodeId);
+      final LibP2PPeer peer = peerLookup.getConnectedPeer(nodeId);
       localMessageHandler.onIncomingMessage(peer, request, callback);
     } catch (final Throwable t) {
       LOG.error("Unhandled error while processing request " + method.getMultistreamId(), t);
-      callback.completeWithError(RpcException.SERVER_ERROR);
+      callback.completeWithError(serverErrorSupplier.get());
     }
   }
 

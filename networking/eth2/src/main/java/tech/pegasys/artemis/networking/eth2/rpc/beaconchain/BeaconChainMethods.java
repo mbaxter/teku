@@ -19,16 +19,16 @@ import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByR
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.GoodbyeMessage;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
-import tech.pegasys.artemis.networking.eth2.peers.PeerLookup;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.PeerLookup;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.BeaconBlocksByRangeMessageHandler;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.BeaconBlocksByRootMessageHandler;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.GoodbyeMessageHandler;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.StatusMessageHandler;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMessageHandler;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMethod;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
 import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMethods;
-import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
+import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 
 public class BeaconChainMethods {

@@ -11,10 +11,11 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.eth2.rpc.core;
+package tech.pegasys.artemis.networking.p2p.rpc;
 
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 
 public final class RpcEncoder {
   public static final byte SUCCESS_RESPONSE_CODE = 0;
