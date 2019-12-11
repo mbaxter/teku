@@ -11,19 +11,19 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
+package tech.pegasys.artemis.networking.eth2.rpc.core;
 
 import java.util.Objects;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
 
-public class RpcMethod<I, O> {
+public class MethodAttributes<I, O> {
 
   private final String methodMultistreamId;
   private final RpcEncoding encoding;
   private final Class<I> requestType;
   private final Class<O> responseType;
 
-  public RpcMethod(
+  public MethodAttributes(
       final String methodMultistreamId,
       final RpcEncoding encoding,
       final Class<I> requestType,
@@ -58,7 +58,7 @@ public class RpcMethod<I, O> {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    final RpcMethod<?, ?> rpcMethod = (RpcMethod<?, ?>) o;
+    final MethodAttributes<?, ?> rpcMethod = (MethodAttributes<?, ?>) o;
     return methodMultistreamId.equals(rpcMethod.methodMultistreamId);
   }
 

@@ -25,8 +25,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.artemis.util.SSZTypes.Bytes4;
 
 class LengthPrefixedEncodingTest {
@@ -46,14 +45,14 @@ class LengthPrefixedEncodingTest {
     assertThatThrownBy(
             () ->
                 encoding.decode(Bytes.fromHexString("0xAAAAAAAAAAAAAAAAAAAA"), StatusMessage.class))
-        .isEqualTo(RpcExceptions.MALFORMED_REQUEST_ERROR);
+        .isEqualTo(RpcException.MALFORMED_REQUEST_ERROR);
   }
 
   @Test
   public void shouldReturnErrorWhenMessageDataIsInvalid() {
     final Bytes invalidMessage = Bytes.fromHexString("0x01AA");
     assertThatThrownBy(() -> encoding.decode(invalidMessage, StatusMessage.class))
-        .isEqualTo(RpcExceptions.MALFORMED_REQUEST_ERROR);
+        .isEqualTo(RpcException.MALFORMED_REQUEST_ERROR);
   }
 
   @Test
@@ -63,7 +62,7 @@ class LengthPrefixedEncodingTest {
             () ->
                 encoding.decode(
                     correctMessage.slice(0, correctMessage.size() - 5), StatusMessage.class))
-        .isEqualTo(RpcExceptions.INCORRECT_LENGTH_ERROR);
+        .isEqualTo(RpcException.INCORRECT_LENGTH_ERROR);
   }
 
   @Test
@@ -73,7 +72,7 @@ class LengthPrefixedEncodingTest {
             () ->
                 encoding.decode(
                     Bytes.concatenate(correctMessage, Bytes.of(1, 2, 3, 4)), StatusMessage.class))
-        .isEqualTo(RpcExceptions.INCORRECT_LENGTH_ERROR);
+        .isEqualTo(RpcException.INCORRECT_LENGTH_ERROR);
   }
 
   @Test
@@ -81,7 +80,7 @@ class LengthPrefixedEncodingTest {
     // We should reject the message based on the length prefix and skip reading the data entirely.
     assertThatThrownBy(
             () -> encoding.decode(LENGTH_PREFIX_EXCEEDING_MAXIMUM_LENGTH, StatusMessage.class))
-        .isEqualTo(RpcExceptions.CHUNK_TOO_LONG_ERROR);
+        .isEqualTo(RpcException.CHUNK_TOO_LONG_ERROR);
   }
 
   @Test
@@ -107,7 +106,7 @@ class LengthPrefixedEncodingTest {
   @Test
   public void shouldThrowRpcExceptionIfMessageLengthPrefixIsMoreThanThreeBytes() {
     assertThatThrownBy(() -> encoding.getMessageLength(Bytes.fromHexString("0x80808001")))
-        .isEqualTo(RpcExceptions.CHUNK_TOO_LONG_ERROR);
+        .isEqualTo(RpcException.CHUNK_TOO_LONG_ERROR);
   }
 
   @Test

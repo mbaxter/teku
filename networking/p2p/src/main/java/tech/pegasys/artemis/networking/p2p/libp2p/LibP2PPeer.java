@@ -17,6 +17,8 @@ import io.libp2p.core.Connection;
 import io.libp2p.core.PeerId;
 import tech.pegasys.artemis.networking.p2p.peer.NodeId;
 import tech.pegasys.artemis.networking.p2p.peer.Peer;
+import tech.pegasys.artemis.networking.p2p.rpc.OutgoingRequestHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseHandler;
 
 public class LibP2PPeer implements Peer {
   private final Connection connection;
@@ -39,8 +41,10 @@ public class LibP2PPeer implements Peer {
   }
 
   @Override
-  public Connection getConnection() {
-    return connection;
+  public <TRequest> void invokeRpc(final OutgoingRequestHandler outgoingRequestHandler,
+    final TRequest tRequest,
+    final ResponseHandler handler) {
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -51,5 +55,9 @@ public class LibP2PPeer implements Peer {
   @Override
   public boolean connectionInitiatedRemotely() {
     return !connectionInitiatedLocally();
+  }
+
+  public Connection getConnection() {
+    return connection;
   }
 }

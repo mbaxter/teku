@@ -14,7 +14,7 @@
 package tech.pegasys.artemis.networking.eth2.rpc.core.encodings;
 
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
 
 public interface RpcPayloadEncoder<T> {
   Bytes encode(T message);

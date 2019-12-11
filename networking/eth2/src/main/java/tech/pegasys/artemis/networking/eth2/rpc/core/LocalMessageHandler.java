@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.p2p.rpc;
+package tech.pegasys.artemis.networking.eth2.rpc.core;
 
 import tech.pegasys.artemis.networking.p2p.peer.Peer;
 

@@ -23,12 +23,10 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.BeaconBlocksByRootRequestMessageEncoder;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.SimpleOffsetSszEncoder;
 import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.ssz.StringSszEncoder;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
 
 public class LengthPrefixedEncoding implements RpcEncoding {
   RpcEncoding SSZ =
@@ -81,12 +79,12 @@ public class LengthPrefixedEncoding implements RpcEncoding {
         expectedLength = in.readRawVarint32();
       } catch (final InvalidProtocolBufferException e) {
         LOG.trace("Invalid length prefix", e);
-        throw RpcExceptions.MALFORMED_REQUEST_ERROR;
+        throw RpcException.MALFORMED_REQUEST_ERROR;
       }
 
       if (expectedLength > MAX_CHUNK_SIZE) {
         LOG.trace("Rejecting message as length is too long");
-        throw RpcExceptions.CHUNK_TOO_LONG_ERROR;
+        throw RpcException.CHUNK_TOO_LONG_ERROR;
       }
 
       final Bytes payload;
@@ -94,18 +92,18 @@ public class LengthPrefixedEncoding implements RpcEncoding {
         payload = Bytes.wrap(in.readRawBytes(expectedLength));
       } catch (final InvalidProtocolBufferException e) {
         LOG.trace("Failed to read message data", e);
-        throw RpcExceptions.INCORRECT_LENGTH_ERROR;
+        throw RpcException.INCORRECT_LENGTH_ERROR;
       }
 
       if (!in.isAtEnd()) {
         LOG.trace("Rejecting message because actual message length exceeds specified length");
-        throw RpcExceptions.INCORRECT_LENGTH_ERROR;
+        throw RpcException.INCORRECT_LENGTH_ERROR;
       }
 
       return parser.decode(payload);
     } catch (IOException e) {
       LOG.error("Unexpected error while processing message: " + message, e);
-      throw RpcExceptions.SERVER_ERROR;
+      throw RpcException.SERVER_ERROR;
     }
   }
 
@@ -125,7 +123,7 @@ public class LengthPrefixedEncoding implements RpcEncoding {
     try {
       return OptionalInt.of(in.readRawVarint32() + prefixLength);
     } catch (final IOException e) {
-      throw RpcExceptions.MALFORMED_MESSAGE_LENGTH_ERROR;
+      throw RpcException.MALFORMED_MESSAGE_LENGTH_ERROR;
     }
   }
 
@@ -133,7 +131,7 @@ public class LengthPrefixedEncoding implements RpcEncoding {
   private OptionalInt getLengthPrefixSize(final Bytes message) throws RpcException {
     for (int i = 0; i < message.size() && i <= MAXIMUM_VARINT_LENGTH; i++) {
       if (i >= MAXIMUM_VARINT_LENGTH) {
-        throw RpcExceptions.CHUNK_TOO_LONG_ERROR;
+        throw RpcException.CHUNK_TOO_LONG_ERROR;
       }
       if ((message.get(i) & 0x80) == 0) {
         return OptionalInt.of(i + 1);

@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
+package tech.pegasys.artemis.networking.eth2.rpc.core;
 
 import static tech.pegasys.artemis.util.alogger.ALogger.STDOUT;
 
@@ -31,29 +31,29 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.jetbrains.annotations.NotNull;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
-import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PPeer;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler.Controller;
 import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PNodeId;
-import tech.pegasys.artemis.networking.p2p.network.Protocol;
+import tech.pegasys.artemis.networking.p2p.libp2p.LibP2PPeer;
+import tech.pegasys.artemis.networking.p2p.libp2p.rpc.PeerLookup;
 import tech.pegasys.artemis.networking.p2p.peer.NodeId;
-import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
-import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcEncoder;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import tech.pegasys.artemis.networking.p2p.rpc.IncomingRequestHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.OutgoingRequestHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.ResponseHandler;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcStream;
+import tech.pegasys.artemis.networking.p2p.rpc.RpcMethod;
 
-public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
-    implements Protocol<Controller<TRequest, ResponseStream<TResponse>>> {
+public class Eth2RpcMethod<TRequest extends RpcRequest, TResponse>
+    implements RpcMethod<TRequest> {
   private static final Logger LOG = LogManager.getLogger();
 
-  private final RpcMethod<TRequest, TResponse> method;
+  private final MethodAttributes<TRequest, TResponse> method;
   private final PeerLookup peerLookup;
   private final LocalMessageHandler<TRequest, TResponse> localMessageHandler;
   private final RpcEncoder rpcEncoder;
   private final Supplier<RpcException> serverErrorSupplier;
   private boolean closeNotification = false;
 
-  public RpcMessageHandler(
-      RpcMethod<TRequest, TResponse> method,
+  public Eth2RpcMethod(
+      MethodAttributes<TRequest, TResponse> method,
       PeerLookup peerLookup,
       LocalMessageHandler<TRequest, TResponse> localMessageHandler,
       Supplier<RpcException> serverErrorSupplier) {
@@ -87,7 +87,7 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
     }
   }
 
-  public RpcMessageHandler<TRequest, TResponse> setCloseNotification() {
+  public Eth2RpcMethod<TRequest, TResponse> setCloseNotification() {
     this.closeNotification = true;
     return this;
   }
@@ -98,7 +98,7 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
     return method.getMultistreamId();
   }
 
-  public RpcMethod<TRequest, TResponse> getMethod() {
+  public MethodAttributes<TRequest, TResponse> getMethod() {
     return method;
   }
 
@@ -122,6 +122,16 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
     return handler.activeFuture;
   }
 
+  @Override
+  public IncomingRequestHandler createIncomingRequestHandler() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public OutgoingRequestHandler<TRequest> createOutgoingRequestHandler() {
+    throw new UnsupportedOperationException();
+  }
+
   interface Controller<TRequest, TResponse> {
     CompletableFuture<TResponse> invoke(TRequest request);
   }
@@ -132,12 +142,12 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
     protected final CompletableFuture<AbstractHandler> activeFuture = new CompletableFuture<>();
   }
 
-  private class ResponderHandler extends AbstractHandler {
+  private class Eth2IncomingRequestHandler implements IncomingRequestHandler {
     private final Connection connection;
     private RequestRpcDecoder<TRequest> requestReader = new RequestRpcDecoder<>(method);
     private ResponseCallback<TResponse> callback;
 
-    public ResponderHandler(Connection connection) {
+    public Eth2IncomingRequestHandler(Connection connection) {
       this.connection = connection;
       activeFuture.complete(this);
     }
@@ -161,9 +171,15 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
         callback.completeWithError(e);
       }
     }
+
+    @Override
+    public void processBytes(final RpcStream rpcStream, final Bytes bytes) {
+      throw new UnsupportedOperationException();
+    }
   }
 
-  private class RequesterHandler extends AbstractHandler {
+  private class Eth2OutgoingRequestHandler implements
+    OutgoingRequestHandler {
     private ChannelHandlerContext ctx;
     private int maximumResponseChunks;
     private ResponseStreamImpl<TResponse> responseStream;
@@ -248,6 +264,11 @@ public class RpcMessageHandler<TRequest extends RpcRequest, TResponse>
         responseStream.completeWithError(t);
       }
       ctx.channel().close();
+    }
+
+    @Override
+    public void initiateRequest(final Object request, final ResponseHandler handler) {
+      throw new UnsupportedOperationException();
     }
   }
 }

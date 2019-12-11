@@ -11,14 +11,19 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.p2p.rpc;
+package tech.pegasys.artemis.networking.eth2.rpc.core.encodings;
 
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
+import java.util.OptionalInt;
+import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
 
-public interface ResponseCallback<T> {
-  void respond(T data);
+public interface RpcEncoding {
 
-  void completeSuccessfully();
+  <T> Bytes encode(T message);
 
-  void completeWithError(RpcException error);
+  <T> T decode(Bytes message, Class<T> clazz) throws RpcException;
+
+  String getName();
+
+  OptionalInt getMessageLength(Bytes message) throws RpcException;
 }

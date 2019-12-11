@@ -26,34 +26,34 @@ import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.GoodbyeMessa
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.methods.StatusMessageHandler;
 import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
+import tech.pegasys.artemis.networking.eth2.rpc.core.MethodAttributes;
 import tech.pegasys.artemis.networking.eth2.rpc.core.RpcMethods;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 
 public class BeaconChainMethods {
-  public static final RpcMethod<StatusMessage, StatusMessage> STATUS =
-      new RpcMethod<>(
+  public static final MethodAttributes<StatusMessage, StatusMessage> STATUS =
+      new MethodAttributes<>(
           "/eth2/beacon_chain/req/status/1",
           RpcEncoding.SSZ,
           StatusMessage.class,
           StatusMessage.class);
-  public static final RpcMethod<GoodbyeMessage, GoodbyeMessage> GOODBYE =
-      new RpcMethod<>(
+  public static final MethodAttributes<GoodbyeMessage, GoodbyeMessage> GOODBYE =
+      new MethodAttributes<>(
           "/eth2/beacon_chain/req/goodbye/1",
           RpcEncoding.SSZ,
           GoodbyeMessage.class,
           GoodbyeMessage.class);
-  public static final RpcMethod<BeaconBlocksByRootRequestMessage, BeaconBlock>
+  public static final MethodAttributes<BeaconBlocksByRootRequestMessage, BeaconBlock>
       BEACON_BLOCKS_BY_ROOT =
-          new RpcMethod<>(
+          new MethodAttributes<>(
               "/eth2/beacon_chain/req/beacon_blocks_by_root/1",
               RpcEncoding.SSZ,
               BeaconBlocksByRootRequestMessage.class,
               BeaconBlock.class);
-  public static final RpcMethod<BeaconBlocksByRangeRequestMessage, BeaconBlock>
+  public static final MethodAttributes<BeaconBlocksByRangeRequestMessage, BeaconBlock>
       BEACON_BLOCKS_BY_RANGE =
-          new RpcMethod<>(
+          new MethodAttributes<>(
               "/eth2/beacon_chain/req/beacon_blocks_by_range/1",
               RpcEncoding.SSZ,
               BeaconBlocksByRangeRequestMessage.class,

@@ -35,8 +35,8 @@ import tech.pegasys.artemis.datastructures.blocks.BeaconBlock;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage;
 import tech.pegasys.artemis.datastructures.util.DataStructureUtil;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
+import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.artemis.storage.ChainStorageClient;
 import tech.pegasys.artemis.storage.Store;
 
@@ -282,7 +282,7 @@ class BeaconBlocksByRangeMessageHandlerTest {
             UnsignedLong.valueOf(skip)),
         listener);
 
-    verify(listener).completeWithError(RpcExceptions.INVALID_STEP);
+    verify(listener).completeWithError(RpcException.INVALID_STEP);
     verifyNoMoreInteractions(listener);
     verifyNoMoreInteractions(storageClient);
   }

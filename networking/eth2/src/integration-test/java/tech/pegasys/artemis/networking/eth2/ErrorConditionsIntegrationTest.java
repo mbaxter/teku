@@ -27,8 +27,8 @@ import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.artemis.datastructures.state.Fork;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.BeaconChainMethods;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.ResponseStream;
-import tech.pegasys.artemis.networking.eth2.rpc.core.RpcExceptions;
+import tech.pegasys.artemis.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseStream;
 import tech.pegasys.artemis.util.Waiter;
 
 public class ErrorConditionsIntegrationTest {
@@ -54,7 +54,7 @@ public class ErrorConditionsIntegrationTest {
     Assertions.assertThatThrownBy(() -> Waiter.waitFor(response))
         .isInstanceOf(ExecutionException.class)
         .extracting(Throwable::getCause)
-        .isEqualToComparingFieldByField(RpcExceptions.MALFORMED_REQUEST_ERROR);
+        .isEqualToComparingFieldByField(RpcException.MALFORMED_REQUEST_ERROR);
   }
 
   // Deliberately doesn't serialize to a valid STATUS message.

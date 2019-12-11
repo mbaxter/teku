@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.artemis.networking.p2p.libp2p.rpc;
+package tech.pegasys.artemis.networking.eth2.rpc.core;
 
 import io.libp2p.core.Connection;
 import io.netty.buffer.ByteBuf;
@@ -19,9 +19,6 @@ import io.netty.channel.ChannelHandlerContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcEncoder;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
 
 class RpcResponseCallback<TResponse> implements ResponseCallback<TResponse> {
   private static final Logger LOG = LogManager.getLogger();

@@ -22,27 +22,25 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
 import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMessageHandler;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.ResponseStream;
 
 public class RpcMethods {
 
-  private final Map<RpcMethod<?, ?>, RpcMessageHandler<?, ?>> methods;
+  private final Map<MethodAttributes<?, ?>, RpcMessageHandler<?, ?>> methods;
 
   public RpcMethods(final RpcMessageHandler<?, ?>... handlers) {
     this.methods = createMethodMap(handlers);
   }
 
-  private Map<RpcMethod<?, ?>, RpcMessageHandler<?, ?>> createMethodMap(
+  private Map<MethodAttributes<?, ?>, RpcMessageHandler<?, ?>> createMethodMap(
       final RpcMessageHandler<?, ?>... handlers) {
-    final ImmutableMap.Builder<RpcMethod<?, ?>, RpcMessageHandler<?, ?>> builder =
+    final ImmutableMap.Builder<MethodAttributes<?, ?>, RpcMessageHandler<?, ?>> builder =
         ImmutableMap.builder();
     Stream.of(handlers).forEach(handler -> builder.put(handler.getMethod(), handler));
     return builder.build();
   }
 
   public <I extends RpcRequest, O> CompletableFuture<ResponseStream<O>> invoke(
-      final RpcMethod<I, O> method, final Connection connection, final I request) {
+      final MethodAttributes<I, O> method, final Connection connection, final I request) {
     return getHandler(method).invokeRemote(connection, request);
   }
 
@@ -52,7 +50,7 @@ public class RpcMethods {
 
   @SuppressWarnings("unchecked")
   private <I extends RpcRequest, O> RpcMessageHandler<I, O> getHandler(
-      final RpcMethod<I, O> method) {
+      final MethodAttributes<I, O> method) {
     return (RpcMessageHandler<I, O>) methods.get(method);
   }
 }

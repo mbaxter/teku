@@ -17,9 +17,7 @@ import io.netty.buffer.ByteBuf;
 import java.util.OptionalInt;
 import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcException;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
-import tech.pegasys.artemis.networking.p2p.libp2p.rpc.RpcMethod;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
 
 public class ResponseRpcDecoder<T> {
 
@@ -31,7 +29,7 @@ public class ResponseRpcDecoder<T> {
   private final Class<T> dataType;
   private final RpcEncoding encoding;
 
-  protected ResponseRpcDecoder(final Consumer<T> callback, final RpcMethod<?, T> method) {
+  protected ResponseRpcDecoder(final Consumer<T> callback, final MethodAttributes<?, T> method) {
     this.callback = callback;
     this.dataType = method.getResponseType();
     this.encoding = method.getEncoding();
@@ -78,7 +76,7 @@ public class ResponseRpcDecoder<T> {
     final boolean consumedAllData = buffer.isEmpty();
     buffer.close();
     if (!consumedAllData) {
-      throw RpcExceptions.INCORRECT_LENGTH_ERROR;
+      throw RpcException.INCORRECT_LENGTH_ERROR;
     }
   }
 }

@@ -17,8 +17,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.artemis.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.artemis.networking.p2p.rpc.LocalMessageHandler;
-import tech.pegasys.artemis.networking.p2p.rpc.ResponseCallback;
+import tech.pegasys.artemis.networking.eth2.rpc.core.LocalMessageHandler;
+import tech.pegasys.artemis.networking.eth2.rpc.core.ResponseCallback;
 
 public class StatusMessageHandler implements LocalMessageHandler<StatusMessage, StatusMessage> {
   private static final Logger LOG = LogManager.getLogger();

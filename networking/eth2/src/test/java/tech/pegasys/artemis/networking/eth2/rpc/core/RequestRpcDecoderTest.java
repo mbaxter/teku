@@ -25,8 +25,7 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.artemis.networking.eth2.rpc.beaconchain.BeaconChainMethods;
-import tech.pegasys.artemis.networking.p2p.rpc.RpcEncoder;
-import tech.pegasys.artemis.networking.p2p.rpc.encoding.RpcEncoding;
+import tech.pegasys.artemis.networking.eth2.rpc.core.encodings.RpcEncoding;
 import tech.pegasys.artemis.util.SSZTypes.Bytes4;
 
 class RequestRpcDecoderTest extends RpcDecoderTestBase {
@@ -120,7 +119,7 @@ class RequestRpcDecoderTest extends RpcDecoderTestBase {
             () ->
                 codec.onDataReceived(
                     buffer(LENGTH_PREFIX, MESSAGE_DATA, Bytes.fromHexString("0x1234"))))
-        .isEqualTo(RpcExceptions.INCORRECT_LENGTH_ERROR);
+        .isEqualTo(RpcException.INCORRECT_LENGTH_ERROR);
     codec.close();
   }
 }
