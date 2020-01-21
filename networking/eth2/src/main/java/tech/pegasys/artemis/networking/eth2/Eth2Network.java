@@ -103,7 +103,9 @@ public class Eth2Network extends DelegatingP2PNetwork<Eth2Peer> implements P2PNe
             0)
         .forEach(eth2DiscoveryService.getNodeTable()::save);
 
-    SafeFuture.of(eth2DiscoveryService.start()).reportExceptions();
+    SafeFuture.of(eth2DiscoveryService.start())
+      .thenAccept(s -> eth2DiscoveryService.findPeers())
+      .reportExceptions();
   }
 
   @Override

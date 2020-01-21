@@ -63,12 +63,12 @@ public class Eth2DiscoveryService extends Service implements DiscoveryNetwork {
   // event bus by which to signal other services
   private final EventBus eventBus;
   private final NetworkConfig config;
+  private final NodeRecord localNodeRecord;
 
   public Eth2DiscoveryService(final NetworkConfig networkConfig, final EventBus eventBus) {
     this.config = networkConfig;
     this.eventBus = eventBus;
 
-    final NodeRecord localNodeRecord;
     try {
       localNodeRecord =
           createNodeRecord(
@@ -138,13 +138,16 @@ public class Eth2DiscoveryService extends Service implements DiscoveryNetwork {
 
   @Override
   public void findPeers() {
-    // nop - is this to start?
+    logger.trace("Find peers");
+    SafeFuture.of(dm.findNodes(localNodeRecord, 100))
+      .thenAccept(r -> logger.debug("Find peers request complete. {} peers found.", streamPeers().count()))
+      .reportExceptions();
   }
 
   @Override
   public Stream<DiscoveryPeer> streamPeers() {
     // use logLimit of 0 to retrieve all entries in the node table
-    return nodeTable.findClosestNodes(nodeTable.getHomeNode().getNodeId(), 0).stream()
+    return nodeTable.findClosestNodes(localNodeRecord.getNodeId(), 0).stream()
         .map(n -> DiscoveryPeer.fromNodeRecord(n.getNode()));
   }
 
