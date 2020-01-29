@@ -37,6 +37,7 @@ import tech.pegasys.artemis.storage.events.StoreGenesisDiskUpdateEvent;
 import tech.pegasys.artemis.storage.events.StoreInitializedEvent;
 import tech.pegasys.artemis.util.SSZTypes.Bytes4;
 import tech.pegasys.artemis.util.alogger.ALogger;
+import tech.pegasys.artemis.util.config.Constants;
 
 /** This class is the ChainStorage client-side logic */
 public class ChainStorageClient implements ChainStorage, StoreUpdateHandler {
@@ -44,7 +45,7 @@ public class ChainStorageClient implements ChainStorage, StoreUpdateHandler {
   protected final EventBus eventBus;
   private final TransactionPrecommit transactionPrecommit;
 
-  private final Bytes4 genesisFork = Fork.VERSION_ZERO;
+  private final Bytes4 genesisFork = Constants.GENESIS_FORK;
   private volatile Store store;
   private volatile Bytes32 bestBlockRoot =
       Bytes32.ZERO; // block chosen by lmd ghost to build and attest on

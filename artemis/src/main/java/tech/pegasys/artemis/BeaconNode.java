@@ -27,6 +27,8 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.core.config.Configurator;
 import tech.pegasys.artemis.data.recorder.SSZTransitionRecorder;
 import tech.pegasys.artemis.metrics.MetricsEndpoint;
@@ -42,7 +44,7 @@ import tech.pegasys.artemis.util.config.Constants;
 import tech.pegasys.artemis.util.time.SystemTimeProvider;
 
 public class BeaconNode {
-
+  private static final Logger LOG = LogManager.getLogger();
   private final Vertx vertx = Vertx.vertx();
   private final ExecutorService threadPool =
       Executors.newCachedThreadPool(
@@ -63,6 +65,8 @@ public class BeaconNode {
     this.serviceConfig =
         new ServiceConfig(
             new SystemTimeProvider(), eventBus, metricsEndpoint.getMetricsSystem(), config);
+
+    LOG.trace("Set network constants to: \"{}\"", config.getConstants());
     Constants.setConstants(config.getConstants());
 
     final String transitionRecordDir = config.getTransitionRecordDir();
