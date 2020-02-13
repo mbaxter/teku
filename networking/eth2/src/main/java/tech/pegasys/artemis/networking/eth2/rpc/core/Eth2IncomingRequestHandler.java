@@ -72,7 +72,7 @@ public class Eth2IncomingRequestHandler<TRequest extends RpcRequest, TResponse>
     try {
       localMessageHandler.onIncomingMessage(peer, request, callback);
     } catch (final Throwable t) {
-      LOG.error("Unhandled error while processing request " + method.getMultistreamId(), t);
+      LOG.error("Unhandled error while processing request from " + peer.getId() + "  :" + method.getMultistreamId(), t);
       callback.completeWithError(RpcException.SERVER_ERROR);
     }
   }

@@ -90,6 +90,8 @@ public class RpcHandler implements ProtocolBinding<Controller> {
   }
 
   static class Controller extends SimpleChannelInboundHandler<ByteBuf> {
+    private static final Logger LOG = LogManager.getLogger();
+
     private final NodeId nodeId;
     private final P2PChannel p2pChannel;
     private RpcRequestHandler rpcRequestHandler;
@@ -101,10 +103,12 @@ public class RpcHandler implements ProtocolBinding<Controller> {
     private Controller(final NodeId nodeId, final P2PChannel p2pChannel) {
       this.nodeId = nodeId;
       this.p2pChannel = p2pChannel;
+      trace("Construct controller (initiator: {})", p2pChannel.isInitiator());
     }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
+      trace("channelActive");
       rpcStream = new LibP2PRpcStream(p2pChannel, ctx);
       activeFuture.complete(this);
     }
@@ -115,6 +119,7 @@ public class RpcHandler implements ProtocolBinding<Controller> {
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final ByteBuf msg) {
+      trace("channelRead0");
       if (rpcRequestHandler != null) {
         rpcRequestHandler.onData(nodeId, rpcStream, msg);
       } else {
@@ -123,6 +128,7 @@ public class RpcHandler implements ProtocolBinding<Controller> {
     }
 
     public void setRequestHandler(RpcRequestHandler rpcRequestHandler) {
+      trace("setRequestHandler");
       if (this.rpcRequestHandler != null) {
         throw new IllegalStateException("Attempt to set an already set data handler");
       }
@@ -135,7 +141,7 @@ public class RpcHandler implements ProtocolBinding<Controller> {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-      LOG.error("Unhandled error while processes req/response", cause);
+      error("Unhandled error while processes req/response", cause);
       final IllegalStateException exception = new IllegalStateException("Channel exception", cause);
       activeFuture.completeExceptionally(exception);
       close();
@@ -144,6 +150,7 @@ public class RpcHandler implements ProtocolBinding<Controller> {
     @Override
     @SuppressWarnings("FutureReturnValueIgnored")
     public void handlerRemoved(ChannelHandlerContext ctx) throws IllegalArgumentException {
+      trace("handlerRemoved");
       // If handler is removed before channel is activated, update future
       activeFuture.completeExceptionally(new IllegalStateException("Stream closed."));
       close();
@@ -156,6 +163,18 @@ public class RpcHandler implements ProtocolBinding<Controller> {
       if (rpcRequestHandler != null) {
         rpcRequestHandler.onRequestComplete();
       }
+    }
+
+    private void trace(final String message, final Object... args) {
+      LOG.trace(prefix() + message, args);
+    }
+
+    private void error(final String message, final Throwable error) {
+      LOG.error(prefix() + message, error);
+    }
+
+    private String prefix() {
+      return String.format("[Ctrl %s Node %s] ", hashCode(), nodeId);
     }
   }
 }
