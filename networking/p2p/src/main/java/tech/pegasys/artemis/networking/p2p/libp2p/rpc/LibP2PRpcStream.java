@@ -17,11 +17,15 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.artemis.networking.p2p.rpc.RpcStream;
 import tech.pegasys.artemis.util.async.SafeFuture;
 
 public class LibP2PRpcStream implements RpcStream {
+  private static final Logger LOG = LogManager.getLogger();
+
   private ChannelHandlerContext ctx;
   private AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -42,12 +46,14 @@ public class LibP2PRpcStream implements RpcStream {
 
   @Override
   public SafeFuture<Void> closeStream() {
+    trace("close");
     closed.set(true);
     return toSafeFuture(ctx.channel().close());
   }
 
   @Override
   public SafeFuture<Void> disconnect() {
+    trace("disconnect");
     closed.set(true);
     return toSafeFuture(ctx.channel().disconnect());
   }
@@ -63,5 +69,18 @@ public class LibP2PRpcStream implements RpcStream {
           }
         });
     return future;
+  }
+
+  private void trace(final String message, final Object ... args) {
+    LOG.trace(prefix() + message, args);
+  }
+
+  private String prefix() {
+    return String.format("[%s] ", this);
+  }
+
+  @Override
+  public String toString() {
+    return String.format("%s %d (ch id: %s)", this.getClass().getSimpleName(), this.hashCode(), ctx.channel().id());
   }
 }

@@ -20,6 +20,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.artemis.datastructures.blocks.SignedBeaconBlock;
@@ -40,6 +42,7 @@ import tech.pegasys.artemis.networking.p2p.peer.Peer;
 import tech.pegasys.artemis.util.async.SafeFuture;
 
 public class Eth2Peer extends DelegatingPeer implements Peer {
+  private static final Logger LOG = LogManager.getLogger();
   private final BeaconChainMethods rpcMethods;
   private final StatusMessageFactory statusMessageFactory;
   private volatile Optional<PeerStatus> remoteStatus = Optional.empty();
@@ -166,6 +169,7 @@ public class Eth2Peer extends DelegatingPeer implements Peer {
     Bytes payload = method.encodeRequest(request);
     final Eth2OutgoingRequestHandler<I, O> handler =
         method.createOutgoingRequestHandler(request.getMaximumRequestChunks());
+    LOG.debug("Send request to {}: {}", getId(), request);
     return this.sendRequest(method, payload, handler)
         .thenAccept(handler::handleInitialPayloadSent)
         .thenApply(

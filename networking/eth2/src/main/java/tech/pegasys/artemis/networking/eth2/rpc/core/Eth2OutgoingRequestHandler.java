@@ -13,12 +13,10 @@
 
 package tech.pegasys.artemis.networking.eth2.rpc.core;
 
-import static tech.pegasys.artemis.util.alogger.ALogger.STDOUT;
-
 import io.netty.buffer.ByteBuf;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.artemis.datastructures.networking.libp2p.rpc.RpcRequest;
 import tech.pegasys.artemis.networking.p2p.peer.NodeId;
 import tech.pegasys.artemis.networking.p2p.rpc.RpcRequestHandler;
@@ -38,33 +36,35 @@ public class Eth2OutgoingRequestHandler<TRequest extends RpcRequest, TResponse>
       final Eth2RpcMethod<TRequest, TResponse> method, final int maximumResponseChunks) {
     this.method = method;
     this.maximumResponseChunks = maximumResponseChunks;
-
     responseHandler = new ResponseRpcDecoder<>(responseStream::respond, this.method);
+
+    debug("Construct new {}", this.getClass().getSimpleName());
+
   }
 
   @Override
   public void onData(final NodeId nodeId, final RpcStream rpcStream, final ByteBuf bytes) {
     if (responseHandler == null) {
-      STDOUT.log(
-          Level.WARN, "Received " + bytes.capacity() + " bytes of data before requesting it.");
+      debug("Received " + bytes.capacity() + " bytes of data before requesting it.");
       throw new IllegalArgumentException("Some data received prior to request: " + bytes);
     }
     try {
-      STDOUT.log(Level.TRACE, "Requester received " + bytes.capacity() + " bytes.");
+      trace("Requester received {} bytes for {}: {}", bytes.capacity(), rpcStream, Bytes.wrapByteBuf(bytes).toHexString());
       responseHandler.onDataReceived(bytes);
       if (responseStream.getResponseChunkCount() == maximumResponseChunks) {
+        trace("Max responses ({}) received for {}, disconnect.", maximumResponseChunks, rpcStream);
         responseHandler.close();
         responseStream.completeSuccessfully();
         rpcStream.disconnect().reportExceptions();
       }
     } catch (final InvalidResponseException e) {
-      LOG.debug("Peer responded with invalid data", e);
+      debug("Peer responded with invalid data for {}: {}", rpcStream, e);
       responseStream.completeWithError(e);
     } catch (final RpcException e) {
-      LOG.debug("Request returned an error {}", e.getErrorMessage());
+      debug("Request returned an error for {}:  {}", rpcStream, e.getErrorMessage());
       responseStream.completeWithError(e);
     } catch (final Throwable t) {
-      LOG.error("Failed to handle response", t);
+      error("Failed to handle response for " + rpcStream, t);
       responseStream.completeWithError(t);
     }
   }
@@ -75,10 +75,10 @@ public class Eth2OutgoingRequestHandler<TRequest extends RpcRequest, TResponse>
       responseHandler.close();
       responseStream.completeSuccessfully();
     } catch (final RpcException e) {
-      LOG.debug("Request returned an error {}", e.getErrorMessage());
+      debug("Request returned an error {}", e.getErrorMessage());
       responseStream.completeWithError(e);
     } catch (final Throwable t) {
-      LOG.error("Failed to handle response", t);
+      error("Failed to handle response", t);
       responseStream.completeWithError(t);
     }
   }
@@ -94,5 +94,21 @@ public class Eth2OutgoingRequestHandler<TRequest extends RpcRequest, TResponse>
 
   public ResponseStreamImpl<TResponse> getResponseStream() {
     return responseStream;
+  }
+
+  private void debug(final String message, final Object... args) {
+    LOG.debug(prefix() + message, args);
+  }
+
+  private void trace(final String message, final Object... args) {
+    LOG.trace(prefix() + message, args);
+  }
+
+  private void error(final String message, final Throwable error) {
+    LOG.error(prefix() + message, error);
+  }
+
+  private String prefix() {
+    return String.format("[ReqHandler %s | %s w %d chunks] ", hashCode(), method.getRequestType().getSimpleName(), maximumResponseChunks);
   }
 }

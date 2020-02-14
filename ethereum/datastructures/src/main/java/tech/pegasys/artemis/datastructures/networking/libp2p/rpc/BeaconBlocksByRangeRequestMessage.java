@@ -13,6 +13,7 @@
 
 package tech.pegasys.artemis.datastructures.networking.libp2p.rpc;
 
+import com.google.common.base.MoreObjects;
 import com.google.common.primitives.UnsignedLong;
 import java.util.List;
 import java.util.Objects;
@@ -94,5 +95,15 @@ public final class BeaconBlocksByRangeRequestMessage
   @Override
   public int hashCode() {
     return Objects.hash(headBlockRoot, startSlot, count, step);
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+      .add("headBlockRoot", headBlockRoot)
+      .add("startSlot", startSlot)
+      .add("count", count)
+      .add("step", step)
+      .toString();
   }
 }
