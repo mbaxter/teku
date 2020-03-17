@@ -15,6 +15,7 @@ package tech.pegasys.artemis.beaconrestapi.handlers.validator;
 
 import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -25,6 +26,7 @@ import static tech.pegasys.artemis.beaconrestapi.CacheControlUtils.CACHE_NONE;
 import io.javalin.core.util.Header;
 import io.javalin.http.Context;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tech.pegasys.artemis.api.ChainDataProvider;
@@ -75,7 +77,7 @@ public class PostDutiesTest {
     when(provider.isStoreAvailable()).thenReturn(true);
     when(context.body()).thenReturn(body);
     when(provider.getValidatorDutiesByRequest(any()))
-        .thenReturn(SafeFuture.completedFuture(List.of()));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(List.of())));
     handler.handle(context);
     verify(provider).isStoreAvailable();
 
@@ -83,5 +85,24 @@ public class PostDutiesTest {
     verify(context).header(Header.CACHE_CONTROL, CACHE_NONE);
     SafeFuture<String> data = args.getValue();
     assertEquals(data.get(), EMPTY_LIST);
+  }
+
+  @Test
+  public void shouldReturnEmptyListWhenValidatorDutiesUnavailable() throws Exception {
+    final String body = "{\"epoch\":0,\"pubkeys\":[]}";
+
+    PostDuties handler = new PostDuties(provider, jsonProvider);
+    when(provider.isStoreAvailable()).thenReturn(true);
+    when(context.body()).thenReturn(body);
+    when(provider.getValidatorDutiesByRequest(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    handler.handle(context);
+    verify(provider).isStoreAvailable();
+
+    verify(context).status(SC_NO_CONTENT);
+    verify(context).result(args.capture());
+    verify(context).header(Header.CACHE_CONTROL, CACHE_NONE);
+    SafeFuture<String> data = args.getValue();
+    assertThat(data.get()).isEmpty();
   }
 }

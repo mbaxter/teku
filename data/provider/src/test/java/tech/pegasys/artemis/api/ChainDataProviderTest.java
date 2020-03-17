@@ -511,12 +511,14 @@ public class ChainDataProviderTest {
     when(mockCombinedChainDataClient.getCommitteesFromState(any(), eq(beaconState.slot)))
         .thenReturn(List.of());
 
-    SafeFuture<List<ValidatorDuties>> future = provider.getValidatorDutiesByRequest(smallRequest);
-    List<ValidatorDuties> validatorDuties = future.get();
+    SafeFuture<Optional<List<ValidatorDuties>>> future =
+        provider.getValidatorDutiesByRequest(smallRequest);
+    Optional<List<ValidatorDuties>> validatorDuties = future.get();
 
-    assertThat(validatorDuties.size()).isEqualTo(1);
+    assertThat(validatorDuties).isPresent();
+    assertThat(validatorDuties.get().size()).isEqualTo(1);
     ValidatorDuties expected = new ValidatorDuties(BLSPubKey.empty(), null, null);
-    assertThat(validatorDuties.get(0)).isEqualToComparingFieldByField(expected);
+    assertThat(validatorDuties.get().get(0)).isEqualToComparingFieldByField(expected);
   }
 
   @Test
@@ -549,20 +551,21 @@ public class ChainDataProviderTest {
             any(), eq(alteredInternalState.getSlot())))
         .thenReturn(committeeAssignments);
 
-    SafeFuture<List<ValidatorDuties>> future =
+    SafeFuture<Optional<List<ValidatorDuties>>> future =
         provider.getValidatorDutiesByRequest(validatorDutiesByRequest);
 
-    List<ValidatorDuties> validatorDuties = future.get();
+    Optional<List<ValidatorDuties>> validatorDuties = future.get();
 
-    assertThat(validatorDuties.size()).isEqualTo(3);
-    assertThat(validatorDuties.get(0))
+    assertThat(validatorDuties).isPresent();
+    assertThat(validatorDuties.get().size()).isEqualTo(3);
+    assertThat(validatorDuties.get().get(0))
         .usingRecursiveComparison()
         .isEqualTo(new ValidatorDuties(alteredState.validators.get(0).pubkey, 0, 0));
     // even though we used key 11 it will come out as 0 since the default keys are all equal
-    assertThat(validatorDuties.get(1))
+    assertThat(validatorDuties.get().get(1))
         .usingRecursiveComparison()
         .isEqualTo(new ValidatorDuties(alteredState.validators.get(11).pubkey, 0, 0));
-    assertThat(validatorDuties.get(2))
+    assertThat(validatorDuties.get().get(2))
         .usingRecursiveComparison()
         .isEqualTo(
             new ValidatorDuties(

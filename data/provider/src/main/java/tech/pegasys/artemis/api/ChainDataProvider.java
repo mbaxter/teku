@@ -226,15 +226,15 @@ public class ChainDataProvider {
             });
   }
 
-  public SafeFuture<List<ValidatorDuties>> getValidatorDutiesByRequest(
+  public SafeFuture<Optional<List<ValidatorDuties>>> getValidatorDutiesByRequest(
       final ValidatorDutiesRequest validatorDutiesRequest) {
 
     if (validatorDutiesRequest == null || !isStoreAvailable()) {
-      return completedFuture(List.of());
+      return completedFuture(Optional.empty());
     }
     final Optional<Bytes32> optionalBlockRoot = getBestBlockRoot();
     if (optionalBlockRoot.isEmpty()) {
-      return completedFuture(List.of());
+      return completedFuture(Optional.empty());
     }
 
     UnsignedLong epoch = validatorDutiesRequest.epoch;
@@ -243,8 +243,8 @@ public class ChainDataProvider {
     return combinedChainDataClient
         .getStateAtSlot(slot, headBlockRoot)
         .thenApply(
-            state -> getValidatorDutiesFromState(state.get(), validatorDutiesRequest.pubkeys))
-        .exceptionally(err -> List.of());
+            state ->
+                state.map(s -> getValidatorDutiesFromState(s, validatorDutiesRequest.pubkeys)));
   }
 
   @VisibleForTesting

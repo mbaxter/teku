@@ -33,6 +33,7 @@ import io.javalin.plugin.openapi.annotations.OpenApiContent;
 import io.javalin.plugin.openapi.annotations.OpenApiRequestBody;
 import io.javalin.plugin.openapi.annotations.OpenApiResponse;
 import java.util.List;
+import java.util.Optional;
 import tech.pegasys.artemis.api.ChainDataProvider;
 import tech.pegasys.artemis.api.schema.ValidatorDuties;
 import tech.pegasys.artemis.api.schema.ValidatorDutiesRequest;
@@ -83,10 +84,20 @@ public class PostDuties implements Handler {
       ValidatorDutiesRequest validatorDutiesRequest =
           jsonProvider.jsonToObject(ctx.body(), ValidatorDutiesRequest.class);
 
-      SafeFuture<List<ValidatorDuties>> future =
+      SafeFuture<Optional<List<ValidatorDuties>>> future =
           provider.getValidatorDutiesByRequest(validatorDutiesRequest);
       ctx.header(Header.CACHE_CONTROL, CACHE_NONE);
-      ctx.result(future.thenApplyChecked(duties -> jsonProvider.objectToJSON(duties)));
+
+      ctx.result(
+          future.thenApplyChecked(
+              duties -> {
+                if (duties.isEmpty()) {
+                  ctx.status(SC_NO_CONTENT);
+                  return "";
+                } else {
+                  return jsonProvider.objectToJSON(duties.get());
+                }
+              }));
 
     } catch (final IllegalArgumentException e) {
       ctx.result(jsonProvider.objectToJSON(new BadRequest(e.getMessage())));
