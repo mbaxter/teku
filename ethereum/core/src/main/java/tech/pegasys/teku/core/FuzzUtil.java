@@ -18,7 +18,9 @@ import tech.pegasys.artemis.util.SSZTypes.SSZContainer;
 import tech.pegasys.artemis.util.sos.SimpleOffsetSerializable;
 import tech.pegasys.artemis.util.config.Constants;
 import tech.pegasys.artemis.datastructures.state.BeaconState;
+import tech.pegasys.artemis.datastructures.state.BeaconStateWithCache;
 import tech.pegasys.artemis.datastructures.operations.Attestation;
+import tech.pegasys.artemis.util.reflectionInformation.ReflectionInformation;
 
 // TODO a Java FuzzHarness interface? - that way type safety can be checked at compile time
 // JNI removes type safety
@@ -90,60 +92,65 @@ public class FuzzUtil {
 
   public  Optional<byte[]> fuzzAttestation(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    FuzzAttestationInput structuredInput = SimpleOffsetSerializer.deserialize(input, FuzzAttestationInput.class);
-    BeaconState state = structuredInput.getState();
+    FuzzAttestationInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), FuzzAttestationInput.class);
+    BeaconState state = BeaconStateWithCache.fromBeaconState(structuredInput.getState());
+    // TODO remove
+    System.out.println("Successfully deserialized!");
     List<Attestation> attestations = new ArrayList<>();
     attestations.add(structuredInput.getAttestation());
 
     // process attestation and return post state
     try {
-      BeaconStateUtil.process_attestations(state, attestations)
+      BlockProcessorUtil.process_attestations(state, attestations);
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
     }
+    Bytes output = SimpleOffsetSerializer.serialize(state);
+    return Optional.of(output.toArrayUnsafe());
+  }
 
 
 
-    // TODO common abstract class for all operations that are state + op?
-    // TODO move to separate package?
+  // TODO common abstract class for all operations that are state + op?
+  // TODO move to separate package?
 
-    private class FuzzAttestationInput implements SimpleOffsetSerializable, SSZContainer {
+  private static class FuzzAttestationInput implements SimpleOffsetSerializable, SSZContainer {
 
-      private BeaconState state;
-      private Attestation attestation;
+    private BeaconState state;
+    private Attestation attestation;
 
-      public FuzzAttestationInput(final BeaconState state, final Attestation attestation) {
-        this.state = state;
-        this.attestation = attestation;
-      }
+    public FuzzAttestationInput(final BeaconState state, final Attestation attestation) {
+      this.state = state;
+      this.attestation = attestation;
+    }
 
-      @Override
-      public int getSSZFieldCount() {
-        return state.getSSZFieldCount() + attestation.getSSZFieldCount();
-      }
+    @Override
+    public int getSSZFieldCount() {
+      return state.getSSZFieldCount() + attestation.getSSZFieldCount();
+    }
 
-      /*@Override
-        public List<Bytes> get_fixed_parts() {
-        List<Bytes> fixedPartsList = new ArrayList<>();
-        fixedPartsList.addAll(state.get_fixed_parts());
-        fixedPartsList.addAll(attestation.get_fixed_parts());
-        return fixedPartsList;
-        }*/
+    /*@Override
+      public List<Bytes> get_fixed_parts() {
+      List<Bytes> fixedPartsList = new ArrayList<>();
+      fixedPartsList.addAll(state.get_fixed_parts());
+      fixedPartsList.addAll(attestation.get_fixed_parts());
+      return fixedPartsList;
+      }*/
 
-      @Override
-      public List<Bytes> get_variable_parts() {
-        // Because we know both fields are variable and registered, we can just serialize.
-        return List.of(SimpleOffsetSerializer.serialize(state), SimpleOffsetSerializer.serialize(attestation));
-      }
+    @Override
+    public List<Bytes> get_variable_parts() {
+      // Because we know both fields are variable and registered, we can just serialize.
+      return List.of(SimpleOffsetSerializer.serialize(state), SimpleOffsetSerializer.serialize(attestation));
+    }
 
-      /** ******************* * GETTERS & SETTERS * * ******************* */
-      public Attestation getAttestation() {
-        return attestation;
-      }
+    /** ******************* * GETTERS & SETTERS * * ******************* */
+    public Attestation getAttestation() {
+      return attestation;
+    }
 
-      public BeaconState getState() {
-        return state;
-      }
+    public BeaconState getState() {
+      return state;
     }
   }
+}
