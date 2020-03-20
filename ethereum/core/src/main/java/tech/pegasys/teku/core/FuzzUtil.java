@@ -15,21 +15,22 @@ package tech.pegasys.artemis.statetransition.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.artemis.datastructures.operations.Attestation;
 import tech.pegasys.artemis.datastructures.state.BeaconState;
-import tech.pegasys.artemis.datastructures.state.BeaconStateWithCache;
+import tech.pegasys.artemis.datastructures.state.BeaconStateImpl;
+import tech.pegasys.artemis.datastructures.state.MutableBeaconState;
 import tech.pegasys.artemis.datastructures.util.BeaconStateUtil;
 import tech.pegasys.artemis.datastructures.util.CommitteeUtil;
 import tech.pegasys.artemis.datastructures.util.SimpleOffsetSerializer;
 import tech.pegasys.artemis.util.SSZTypes.SSZContainer;
 import tech.pegasys.artemis.util.config.Constants;
-import tech.pegasys.artemis.util.reflectionInformation.ReflectionInformation;
+import tech.pegasys.artemis.util.sos.ReflectionInformation;
 import tech.pegasys.artemis.util.sos.SimpleOffsetSerializable;
+import tech.pegasys.artemis.util.SSZTypes.SSZList;
 
 // TODO a Java FuzzHarness interface? - that way type safety can be checked at compile time
 // JNI removes type safety
@@ -48,24 +49,25 @@ public class FuzzUtil {
   private static final int OUTPUT_INDEX_BYTES = Long.BYTES;
 
   // NOTE: this uses primitive values as parameters to more easily call via JNI
-  public FuzzUtil(boolean useMainnetConfig, boolean disable_bls) {
+  public FuzzUtil(final boolean useMainnetConfig, final boolean disable_bls) {
+    // NOTE: makes global Constants/config changes
     if (useMainnetConfig) {
       Constants.setConstants("mainnet");
     } else {
       Constants.setConstants("minimal");
     }
+    // TODO check if these are needed after setting constants:
+    BeaconStateImpl.resetSSZType(); // TODO getSSZType() is not directly used for deserialization but I'm guessing this might be necessary soon?
+    SimpleOffsetSerializer.setConstants();
+    System.out.println("Here!");
+    SimpleOffsetSerializer.classReflectionInfo.put(AttestationFuzzInput.class, new ReflectionInformation(AttestationFuzzInput.class));
+
     if (disable_bls) {
       // TODO enable/disable BLS verification
       // TODO implement
     }
-    // Only absent if this class has already been instantiated
-    SimpleOffsetSerializer.classReflectionInfo.computeIfAbsent(
-        FuzzAttestationInput.class, cls -> new ReflectionInformation(cls));
   }
 
-  // Make them instance methods if we need to pass initialization e.g. to what config to use or
-  // disable bls
-  // final?
   public Optional<byte[]> fuzzShuffle(final byte[] input) {
     if (input.length < (32 + 2)) {
       return Optional.empty();
@@ -105,17 +107,16 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzAttestation(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    FuzzAttestationInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), FuzzAttestationInput.class);
-    BeaconState state = BeaconStateWithCache.fromBeaconState(structuredInput.getState());
+    AttestationFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttestationFuzzInput.class);
+    if (structuredInput == null) {
+      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+    }
     // TODO remove
     System.out.println("Successfully deserialized!");
-    List<Attestation> attestations = new ArrayList<>();
-    attestations.add(structuredInput.getAttestation());
-
+    MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process attestation and return post state
     try {
-      BlockProcessorUtil.process_attestations(state, attestations);
+      BlockProcessorUtil.process_attestations(state, SSZList.singleton(structuredInput.getAttestation()));
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -124,24 +125,35 @@ public class FuzzUtil {
     return Optional.of(output.toArrayUnsafe());
   }
 
+  /** ******************** Input Classes **********************/
+
   // TODO common abstract class for all operations that are state + op?
   // TODO move to separate package?
+  // NOTE: not obvious how to have a generic "OperationFuzzInput" class because the get_fixed_parts and get_variable_parts
+  // implementations can be different
+  private static class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
-  private static class FuzzAttestationInput implements SimpleOffsetSerializable, SSZContainer {
-
-    private BeaconState state;
+    // TODO should this be a BeaconState or BeaconStateImpl?
+    private BeaconStateImpl state;
     private Attestation attestation;
 
-    public FuzzAttestationInput(final BeaconState state, final Attestation attestation) {
+    public AttestationFuzzInput(final BeaconStateImpl state, final Attestation attestation) {
       this.state = state;
       this.attestation = attestation;
     }
+
+    // NOTE: empty constructor is needed for reflection/introspection
+    public AttestationFuzzInput() {
+      this(new BeaconStateImpl(), new Attestation());
+    }
+
 
     @Override
     public int getSSZFieldCount() {
       return state.getSSZFieldCount() + attestation.getSSZFieldCount();
     }
 
+    // Since its both fields are variable we leave untouched?
     /*@Override
     public List<Bytes> get_fixed_parts() {
     List<Bytes> fixedPartsList = new ArrayList<>();
