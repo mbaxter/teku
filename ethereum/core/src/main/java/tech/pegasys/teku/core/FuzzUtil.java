@@ -73,7 +73,6 @@ public class FuzzUtil {
     // TODO check if these are needed after setting constants:
     BeaconStateImpl.resetSSZType(); // TODO getSSZType() is not directly used for deserialization but I'm guessing this might be necessary soon?
     SimpleOffsetSerializer.setConstants();
-    System.out.println("Here!");
     SimpleOffsetSerializer.classReflectionInfo.put(AttestationFuzzInput.class, new ReflectionInformation(AttestationFuzzInput.class));
     SimpleOffsetSerializer.classReflectionInfo.put(AttesterSlashingFuzzInput.class, new ReflectionInformation(AttesterSlashingFuzzInput.class));
     SimpleOffsetSerializer.classReflectionInfo.put(BlockFuzzInput.class, new ReflectionInformation(BlockFuzzInput.class));
