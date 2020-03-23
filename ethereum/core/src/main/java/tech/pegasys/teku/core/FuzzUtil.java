@@ -13,22 +13,22 @@
 
 package tech.pegasys.artemis.statetransition.util;
 
+import com.google.common.primitives.UnsignedLong;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
-import com.google.common.primitives.UnsignedLong;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.artemis.datastructures.blocks.BeaconBlock;
+import tech.pegasys.artemis.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.artemis.datastructures.operations.Attestation;
-import tech.pegasys.artemis.datastructures.operations.SignedVoluntaryExit;
-import tech.pegasys.artemis.datastructures.operations.VoluntaryExit;
+import tech.pegasys.artemis.datastructures.operations.AttesterSlashing;
 import tech.pegasys.artemis.datastructures.operations.Deposit;
 import tech.pegasys.artemis.datastructures.operations.ProposerSlashing;
-import tech.pegasys.artemis.datastructures.operations.AttesterSlashing;
-import tech.pegasys.artemis.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.artemis.datastructures.blocks.BeaconBlock;
+import tech.pegasys.artemis.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.artemis.datastructures.operations.VoluntaryExit;
 import tech.pegasys.artemis.datastructures.state.BeaconState;
 import tech.pegasys.artemis.datastructures.state.BeaconStateImpl;
 import tech.pegasys.artemis.datastructures.state.MutableBeaconState;
@@ -38,11 +38,11 @@ import tech.pegasys.artemis.datastructures.util.SimpleOffsetSerializer;
 import tech.pegasys.artemis.statetransition.StateTransition;
 import tech.pegasys.artemis.statetransition.StateTransitionException;
 import tech.pegasys.artemis.util.SSZTypes.SSZContainer;
+import tech.pegasys.artemis.util.SSZTypes.SSZList;
+import tech.pegasys.artemis.util.bls.BLSSignature;
 import tech.pegasys.artemis.util.config.Constants;
 import tech.pegasys.artemis.util.sos.ReflectionInformation;
-import tech.pegasys.artemis.util.bls.BLSSignature;
 import tech.pegasys.artemis.util.sos.SimpleOffsetSerializable;
-import tech.pegasys.artemis.util.SSZTypes.SSZList;
 
 // TODO a Java FuzzHarness interface? - that way type safety can be checked at compile time
 // JNI removes type safety
@@ -71,15 +71,26 @@ public class FuzzUtil {
       Constants.setConstants("minimal");
     }
     // TODO check if these are needed after setting constants:
-    BeaconStateImpl.resetSSZType(); // TODO getSSZType() is not directly used for deserialization but I'm guessing this might be necessary soon?
+    BeaconStateImpl
+        .resetSSZType(); // TODO getSSZType() is not directly used for deserialization but I'm
+    // guessing this might be necessary soon?
     SimpleOffsetSerializer.setConstants();
-    SimpleOffsetSerializer.classReflectionInfo.put(AttestationFuzzInput.class, new ReflectionInformation(AttestationFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(AttesterSlashingFuzzInput.class, new ReflectionInformation(AttesterSlashingFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(BlockFuzzInput.class, new ReflectionInformation(BlockFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(BlockHeaderFuzzInput.class, new ReflectionInformation(BlockHeaderFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(DepositFuzzInput.class, new ReflectionInformation(DepositFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(ProposerSlashingFuzzInput.class, new ReflectionInformation(ProposerSlashingFuzzInput.class));
-    SimpleOffsetSerializer.classReflectionInfo.put(VoluntaryExitFuzzInput.class, new ReflectionInformation(VoluntaryExitFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        AttestationFuzzInput.class, new ReflectionInformation(AttestationFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        AttesterSlashingFuzzInput.class,
+        new ReflectionInformation(AttesterSlashingFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        BlockFuzzInput.class, new ReflectionInformation(BlockFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        BlockHeaderFuzzInput.class, new ReflectionInformation(BlockHeaderFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        DepositFuzzInput.class, new ReflectionInformation(DepositFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        ProposerSlashingFuzzInput.class,
+        new ReflectionInformation(ProposerSlashingFuzzInput.class));
+    SimpleOffsetSerializer.classReflectionInfo.put(
+        VoluntaryExitFuzzInput.class, new ReflectionInformation(VoluntaryExitFuzzInput.class));
 
     this.disable_bls = disable_bls;
     /*if (disable_bls) {
@@ -90,16 +101,19 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzAttestation(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    AttestationFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttestationFuzzInput.class);
+    AttestationFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttestationFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     // TODO remove
     System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
-      BlockProcessorUtil.process_attestations(state, SSZList.singleton(structuredInput.getAttestation()));
+      BlockProcessorUtil.process_attestations(
+          state, SSZList.singleton(structuredInput.getAttestation()));
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -110,16 +124,19 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzAttesterSlashing(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    AttesterSlashingFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttesterSlashingFuzzInput.class);
+    AttesterSlashingFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttesterSlashingFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     // TODO remove
     System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
-      BlockProcessorUtil.process_attester_slashings(state, SSZList.singleton(structuredInput.getAttester_slashing()));
+      BlockProcessorUtil.process_attester_slashings(
+          state, SSZList.singleton(structuredInput.getAttester_slashing()));
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -130,15 +147,22 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzBlock(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    BlockFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockFuzzInput.class);
+    BlockFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO this currently will disable state root validation and some (not all) sig validation, would be preferable to control each individually
+    // TODO this currently will disable state root validation and some (not all) sig validation,
+    // would be preferable to control each individually
     boolean validate_root_and_sigs = !disable_bls;
     try {
       StateTransition transition = new StateTransition();
-      BeaconState postState = transition.initiate(structuredInput.getState(), structuredInput.getSigned_block(), validate_root_and_sigs);
+      BeaconState postState =
+          transition.initiate(
+              structuredInput.getState(),
+              structuredInput.getSigned_block(),
+              validate_root_and_sigs);
       Bytes output = SimpleOffsetSerializer.serialize(postState);
       return Optional.of(output.toArrayUnsafe());
     } catch (StateTransitionException e) {
@@ -149,9 +173,11 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzBlockHeader(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    BlockHeaderFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockHeaderFuzzInput.class);
+    BlockHeaderFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockHeaderFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     try {
@@ -166,9 +192,11 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzDeposit(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    DepositFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), DepositFuzzInput.class);
+    DepositFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), DepositFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     // TODO remove
     System.out.println("Successfully deserialized!");
@@ -187,16 +215,19 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzProposerSlashing(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    ProposerSlashingFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), ProposerSlashingFuzzInput.class);
+    ProposerSlashingFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), ProposerSlashingFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     // TODO remove
     System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
-      BlockProcessorUtil.process_proposer_slashings(state, SSZList.singleton(structuredInput.getProposer_slashing()));
+      BlockProcessorUtil.process_proposer_slashings(
+          state, SSZList.singleton(structuredInput.getProposer_slashing()));
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -237,9 +268,11 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzVoluntaryExit(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    VoluntaryExitFuzzInput structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(input), VoluntaryExitFuzzInput.class);
+    VoluntaryExitFuzzInput structuredInput =
+        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), VoluntaryExitFuzzInput.class);
     if (structuredInput == null) {
-      throw new RuntimeException("Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     // TODO remove
     System.out.println("Successfully deserialized!");
@@ -247,7 +280,8 @@ public class FuzzUtil {
     // TODO confirm exit is a fixed container
     // process and return post state
     try {
-      BlockProcessorUtil.process_voluntary_exits(state, SSZList.singleton(structuredInput.getExit()));
+      BlockProcessorUtil.process_voluntary_exits(
+          state, SSZList.singleton(structuredInput.getExit()));
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -256,12 +290,12 @@ public class FuzzUtil {
     return Optional.of(output.toArrayUnsafe());
   }
 
-
-  /** ******************** Input Classes **********************/
+  /** ******************** Input Classes ********************* */
 
   // TODO common abstract class for all operations that are state + op?
   // TODO move to separate package?
-  // NOTE: not obvious how to have a generic "OperationFuzzInput" class because the get_fixed_parts and get_variable_parts
+  // NOTE: not obvious how to have a generic "OperationFuzzInput" class because the get_fixed_parts
+  // and get_variable_parts
   // implementations can be different
   private static class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
@@ -278,7 +312,6 @@ public class FuzzUtil {
     public AttestationFuzzInput() {
       this(new BeaconStateImpl(), new Attestation());
     }
-
 
     @Override
     public int getSSZFieldCount() {
@@ -317,16 +350,16 @@ public class FuzzUtil {
     private BeaconStateImpl state;
     private AttesterSlashing attester_slashing;
 
-    public AttesterSlashingFuzzInput(final BeaconStateImpl state, final AttesterSlashing attester_slashing) {
+    public AttesterSlashingFuzzInput(
+        final BeaconStateImpl state, final AttesterSlashing attester_slashing) {
       this.state = state;
       this.attester_slashing = attester_slashing;
     }
 
     // NOTE: empty constructor is needed for reflection/introspection
-    //public AttesterSlashingFuzzInput() {
+    // public AttesterSlashingFuzzInput() {
     //  this(new BeaconStateImpl(), new AttesterSlashing());
-    //}
-
+    // }
 
     @Override
     public int getSSZFieldCount() {
@@ -346,7 +379,8 @@ public class FuzzUtil {
     public List<Bytes> get_variable_parts() {
       // Because we know both fields are variable and registered, we can just serialize.
       return List.of(
-          SimpleOffsetSerializer.serialize(state), SimpleOffsetSerializer.serialize(attester_slashing));
+          SimpleOffsetSerializer.serialize(state),
+          SimpleOffsetSerializer.serialize(attester_slashing));
     }
 
     /** ******************* * GETTERS & SETTERS * * ******************* */
@@ -373,7 +407,6 @@ public class FuzzUtil {
     public BlockFuzzInput() {
       this(new BeaconStateImpl(), new SignedBeaconBlock(new BeaconBlock(), BLSSignature.empty()));
     }
-
 
     @Override
     public int getSSZFieldCount() {
@@ -406,8 +439,9 @@ public class FuzzUtil {
     }
   }
 
-  /** Note: BlockHeader fuzzing target accepts a block as input
-   * (not a SignedBeaconBlock or BeaconBlockHeader)
+  /**
+   * Note: BlockHeader fuzzing target accepts a block as input (not a SignedBeaconBlock or
+   * BeaconBlockHeader)
    */
   private static class BlockHeaderFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
@@ -424,7 +458,6 @@ public class FuzzUtil {
     public BlockHeaderFuzzInput() {
       this(new BeaconStateImpl(), new BeaconBlock());
     }
-
 
     @Override
     public int getSSZFieldCount() {
@@ -473,7 +506,6 @@ public class FuzzUtil {
       this(new BeaconStateImpl(), new Deposit());
     }
 
-
     @Override
     public int getSSZFieldCount() {
       return state.getSSZFieldCount() + deposit.getSSZFieldCount();
@@ -481,16 +513,15 @@ public class FuzzUtil {
 
     @Override
     public List<Bytes> get_fixed_parts() {
-    List<Bytes> fixedPartsList = new ArrayList<>();
-    fixedPartsList.add(Bytes.EMPTY);
-    fixedPartsList.add(SimpleOffsetSerializer.serialize(deposit));
-    return fixedPartsList;
+      List<Bytes> fixedPartsList = new ArrayList<>();
+      fixedPartsList.add(Bytes.EMPTY);
+      fixedPartsList.add(SimpleOffsetSerializer.serialize(deposit));
+      return fixedPartsList;
     }
 
     @Override
     public List<Bytes> get_variable_parts() {
-      return List.of(
-          SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
+      return List.of(SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
     }
 
     /** ******************* * GETTERS & SETTERS * * ******************* */
@@ -509,16 +540,16 @@ public class FuzzUtil {
     private BeaconStateImpl state;
     private ProposerSlashing proposer_slashing;
 
-    public ProposerSlashingFuzzInput(final BeaconStateImpl state, final ProposerSlashing proposer_slashing) {
+    public ProposerSlashingFuzzInput(
+        final BeaconStateImpl state, final ProposerSlashing proposer_slashing) {
       this.state = state;
       this.proposer_slashing = proposer_slashing;
     }
 
     // NOTE: empty constructor is needed for reflection/introspection
-    //public ProposerSlashingFuzzInput() {
+    // public ProposerSlashingFuzzInput() {
     //  this(new BeaconStateImpl(), new ProposerSlashing());
-    //}
-
+    // }
 
     @Override
     public int getSSZFieldCount() {
@@ -527,16 +558,15 @@ public class FuzzUtil {
 
     @Override
     public List<Bytes> get_fixed_parts() {
-    List<Bytes> fixedPartsList = new ArrayList<>();
-    fixedPartsList.add(Bytes.EMPTY);
-    fixedPartsList.add(SimpleOffsetSerializer.serialize(proposer_slashing));
-    return fixedPartsList;
+      List<Bytes> fixedPartsList = new ArrayList<>();
+      fixedPartsList.add(Bytes.EMPTY);
+      fixedPartsList.add(SimpleOffsetSerializer.serialize(proposer_slashing));
+      return fixedPartsList;
     }
 
     @Override
     public List<Bytes> get_variable_parts() {
-      return List.of(
-          SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
+      return List.of(SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
     }
 
     /** ******************* * GETTERS & SETTERS * * ******************* */
@@ -564,9 +594,12 @@ public class FuzzUtil {
     // TODO how is new ReflectionInformation(VoluntaryExit.class) supposed to work when
     // it cals newInstance() with no arguments but VoluntaryExit has no 0 arg constructor?
     public VoluntaryExitFuzzInput() {
-      this(new BeaconStateImpl(), new SignedVoluntaryExit(new VoluntaryExit(UnsignedLong.valueOf(0), UnsignedLong.valueOf(0)), BLSSignature.empty()));
+      this(
+          new BeaconStateImpl(),
+          new SignedVoluntaryExit(
+              new VoluntaryExit(UnsignedLong.valueOf(0), UnsignedLong.valueOf(0)),
+              BLSSignature.empty()));
     }
-
 
     @Override
     public int getSSZFieldCount() {
@@ -575,16 +608,15 @@ public class FuzzUtil {
 
     @Override
     public List<Bytes> get_fixed_parts() {
-    List<Bytes> fixedPartsList = new ArrayList<>();
-    fixedPartsList.add(Bytes.EMPTY);
-    fixedPartsList.add(SimpleOffsetSerializer.serialize(exit));
-    return fixedPartsList;
+      List<Bytes> fixedPartsList = new ArrayList<>();
+      fixedPartsList.add(Bytes.EMPTY);
+      fixedPartsList.add(SimpleOffsetSerializer.serialize(exit));
+      return fixedPartsList;
     }
 
     @Override
     public List<Bytes> get_variable_parts() {
-      return List.of(
-          SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
+      return List.of(SimpleOffsetSerializer.serialize(state), Bytes.EMPTY);
     }
 
     /** ******************* * GETTERS & SETTERS * * ******************* */
@@ -597,4 +629,3 @@ public class FuzzUtil {
     }
   }
 }
-
