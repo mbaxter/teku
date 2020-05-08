@@ -107,8 +107,6 @@ public class FuzzUtil {
       throw new RuntimeException(
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO remove
-    System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
@@ -130,8 +128,6 @@ public class FuzzUtil {
       throw new RuntimeException(
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO remove
-    System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
@@ -155,6 +151,7 @@ public class FuzzUtil {
     }
     // TODO this currently will disable state root validation and some (not all) sig validation,
     // would be preferable to control each individually
+    // this currently causes some blocks differences to be detected
     boolean validate_root_and_sigs = !disable_bls;
     try {
       StateTransition transition = new StateTransition();
@@ -192,14 +189,13 @@ public class FuzzUtil {
 
   public Optional<byte[]> fuzzDeposit(final byte[] input) {
     // allow exception to propagate on failure - indicates a preprocessing or deserializing error
+
     DepositFuzzInput structuredInput =
         SimpleOffsetSerializer.deserialize(Bytes.wrap(input), DepositFuzzInput.class);
     if (structuredInput == null) {
       throw new RuntimeException(
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO remove
-    System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // TODO confirm deposit is a fixed size container
     // process and return post state
@@ -221,8 +217,6 @@ public class FuzzUtil {
       throw new RuntimeException(
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO remove
-    System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // process and return post state
     try {
@@ -261,8 +255,6 @@ public class FuzzUtil {
     for (int i = 0; i < count; i++) {
       result_bb.putLong(CommitteeUtil.compute_shuffled_index(i, count, seed));
     }
-    // Bytes tmp = Bytes.wrapByteBuffer(result_bb);
-    // System.out.println("Result: " + tmp.toHexString());
     return Optional.of(result_bb.array());
   }
 
@@ -274,8 +266,6 @@ public class FuzzUtil {
       throw new RuntimeException(
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
-    // TODO remove
-    System.out.println("Successfully deserialized!");
     MutableBeaconState state = structuredInput.getState().createWritableCopy();
     // TODO confirm exit is a fixed container
     // process and return post state
@@ -297,7 +287,7 @@ public class FuzzUtil {
   // NOTE: not obvious how to have a generic "OperationFuzzInput" class because the get_fixed_parts
   // and get_variable_parts
   // implementations can be different
-  private static class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
@@ -344,7 +334,7 @@ public class FuzzUtil {
     }
   }
 
-  private static class AttesterSlashingFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class AttesterSlashingFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
@@ -393,7 +383,7 @@ public class FuzzUtil {
     }
   }
 
-  private static class BlockFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class BlockFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     private BeaconStateImpl state;
     private SignedBeaconBlock signed_block;
@@ -443,7 +433,7 @@ public class FuzzUtil {
    * Note: BlockHeader fuzzing target accepts a block as input (not a SignedBeaconBlock or
    * BeaconBlockHeader)
    */
-  private static class BlockHeaderFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class BlockHeaderFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
@@ -490,7 +480,7 @@ public class FuzzUtil {
     }
   }
 
-  private static class DepositFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class DepositFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
@@ -534,7 +524,7 @@ public class FuzzUtil {
     }
   }
 
-  private static class ProposerSlashingFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class ProposerSlashingFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
@@ -579,7 +569,7 @@ public class FuzzUtil {
     }
   }
 
-  private static class VoluntaryExitFuzzInput implements SimpleOffsetSerializable, SSZContainer {
+  public static class VoluntaryExitFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
     // TODO should this be a BeaconState or BeaconStateImpl?
     private BeaconStateImpl state;
