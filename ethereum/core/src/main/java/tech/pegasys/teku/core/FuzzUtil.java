@@ -11,7 +11,6 @@
  * specific language governing permissions and limitations under the License.
  */
 
-// TODO move to better package?
 package tech.pegasys.teku.core;
 
 import com.google.common.primitives.UnsignedLong;
@@ -22,6 +21,8 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.core.exceptions.BlockProcessingException;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.operations.Attestation;
@@ -32,19 +33,14 @@ import tech.pegasys.teku.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.BeaconStateImpl;
-import tech.pegasys.teku.datastructures.state.MutableBeaconState;
 import tech.pegasys.teku.datastructures.util.BeaconStateUtil;
 import tech.pegasys.teku.datastructures.util.CommitteeUtil;
 import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
-import tech.pegasys.teku.core.exceptions.BlockProcessingException;
-import tech.pegasys.teku.core.StateTransition;
-import tech.pegasys.teku.core.StateTransitionException;
+import tech.pegasys.teku.ssz.SSZTypes.SSZContainer;
 import tech.pegasys.teku.ssz.SSZTypes.SSZList;
-import tech.pegasys.teku.bls.BLSSignature;
-import tech.pegasys.teku.util.config.Constants;
 import tech.pegasys.teku.ssz.sos.ReflectionInformation;
 import tech.pegasys.teku.ssz.sos.SimpleOffsetSerializable;
-import tech.pegasys.teku.ssz.SSZTypes.SSZContainer;
+import tech.pegasys.teku.util.config.Constants;
 
 // TODO a Java FuzzHarness interface? - that way type safety can be checked at compile time
 // JNI removes type safety
@@ -108,13 +104,16 @@ public class FuzzUtil {
     }
     // process and return post state
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state-> {
-      BlockProcessorUtil.process_attestations(
-          state, SSZList.singleton(structuredInput.getAttestation()));
-          });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_attestations(
+                        state, SSZList.singleton(structuredInput.getAttestation()));
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -131,13 +130,16 @@ public class FuzzUtil {
     }
     // process and return post state
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state-> {
-          BlockProcessorUtil.process_attester_slashings(
-          state, SSZList.singleton(structuredInput.getAttester_slashing()));
-    });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_attester_slashings(
+                        state, SSZList.singleton(structuredInput.getAttester_slashing()));
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -180,12 +182,15 @@ public class FuzzUtil {
           "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
     }
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state -> {
-      BlockProcessorUtil.process_block_header(state, structuredInput.getBlock());
-          });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_block_header(state, structuredInput.getBlock());
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -204,12 +209,16 @@ public class FuzzUtil {
     // TODO confirm deposit is a fixed size container
     // process and return post state
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state -> {
-      BlockProcessorUtil.process_deposits(state, SSZList.singleton(structuredInput.getDeposit()));
-          });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_deposits(
+                        state, SSZList.singleton(structuredInput.getDeposit()));
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -226,13 +235,16 @@ public class FuzzUtil {
     }
     // process and return post state
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state -> {
-      BlockProcessorUtil.process_proposer_slashings(
-          state, SSZList.singleton(structuredInput.getProposer_slashing()));
-          });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_proposer_slashings(
+                        state, SSZList.singleton(structuredInput.getProposer_slashing()));
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
@@ -278,13 +290,16 @@ public class FuzzUtil {
     // TODO confirm exit is a fixed container
     // process and return post state
     try {
-      BeaconState postState = structuredInput.getState().updated(
-          state -> {
-      BlockProcessorUtil.process_voluntary_exits(
-          state, SSZList.singleton(structuredInput.getExit()));
-          });
-    Bytes output = SimpleOffsetSerializer.serialize(postState);
-    return Optional.of(output.toArrayUnsafe());
+      BeaconState postState =
+          structuredInput
+              .getState()
+              .updated(
+                  state -> {
+                    BlockProcessorUtil.process_voluntary_exits(
+                        state, SSZList.singleton(structuredInput.getExit()));
+                  });
+      Bytes output = SimpleOffsetSerializer.serialize(postState);
+      return Optional.of(output.toArrayUnsafe());
     } catch (BlockProcessingException e) {
       // "expected error"
       return Optional.empty();
