@@ -90,13 +90,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzAttestation(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    AttestationFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttestationFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    AttestationFuzzInput structuredInput = deserialize(input, AttestationFuzzInput.class);
+
     // process and return post state
     try {
       BeaconState postState =
@@ -116,13 +111,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzAttesterSlashing(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    AttesterSlashingFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), AttesterSlashingFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    AttesterSlashingFuzzInput structuredInput = deserialize(input, AttesterSlashingFuzzInput.class);
+
     // process and return post state
     try {
       BeaconState postState =
@@ -142,13 +132,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzBlock(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    BlockFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    BlockFuzzInput structuredInput = deserialize(input, BlockFuzzInput.class);
+
     // TODO this currently will disable state root validation and some (not all) sig validation,
     // would be preferable to control each individually
     // this currently causes some blocks differences to be detected
@@ -169,13 +154,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzBlockHeader(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    BlockHeaderFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), BlockHeaderFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    BlockHeaderFuzzInput structuredInput = deserialize(input, BlockHeaderFuzzInput.class);
+
     try {
       BeaconState postState =
           structuredInput
@@ -193,14 +173,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzDeposit(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
+    DepositFuzzInput structuredInput = deserialize(input, DepositFuzzInput.class);
 
-    DepositFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), DepositFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
     // TODO confirm deposit is a fixed size container
     // process and return post state
     try {
@@ -221,13 +195,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzProposerSlashing(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    ProposerSlashingFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), ProposerSlashingFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    ProposerSlashingFuzzInput structuredInput = deserialize(input, ProposerSlashingFuzzInput.class);
+
     // process and return post state
     try {
       BeaconState postState =
@@ -275,13 +244,8 @@ public class FuzzUtil {
   }
 
   public Optional<byte[]> fuzzVoluntaryExit(final byte[] input) {
-    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
-    VoluntaryExitFuzzInput structuredInput =
-        SimpleOffsetSerializer.deserialize(Bytes.wrap(input), VoluntaryExitFuzzInput.class);
-    if (structuredInput == null) {
-      throw new RuntimeException(
-          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
-    }
+    VoluntaryExitFuzzInput structuredInput = deserialize(input, VoluntaryExitFuzzInput.class);
+
     // TODO confirm exit is a fixed container
     // process and return post state
     try {
@@ -299,5 +263,15 @@ public class FuzzUtil {
       // "expected error"
       return Optional.empty();
     }
+  }
+
+  private <T> T deserialize(byte[] data, Class<T> type) {
+    // allow exception to propagate on failure - indicates a preprocessing or deserializing error
+    T structuredInput = SimpleOffsetSerializer.deserialize(Bytes.wrap(data), type);
+    if (structuredInput == null) {
+      throw new RuntimeException(
+          "Failed to deserialize input. Likely a preprocessing or deserialization bug.");
+    }
+    return structuredInput;
   }
 }
