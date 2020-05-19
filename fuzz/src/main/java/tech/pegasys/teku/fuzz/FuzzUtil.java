@@ -50,7 +50,6 @@ public class FuzzUtil {
   // Could also have these all in separate classes, which implement a "FuzzHarness" interface
 
   // Size of ValidatorIndex returned by shuffle
-  // private static final int VALIDATOR_INDEX_BYTES = Integer.BYTES;
   private static final int OUTPUT_INDEX_BYTES = Long.BYTES;
 
   private boolean disable_bls;
