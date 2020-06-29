@@ -42,7 +42,6 @@ class StoreTransactionUpdates {
   private final Set<Bytes32> prunedHotBlockRoots;
   private final Map<Checkpoint, BeaconState> checkpointStates;
   private final Set<Checkpoint> prunedCheckpointStates;
-  private final HashTree updatedBlockTree;
 
   private StoreTransactionUpdates(
       final Transaction tx,
@@ -51,8 +50,7 @@ class StoreTransactionUpdates {
       final Map<Bytes32, BeaconState> hotStates,
       final Set<Bytes32> prunedHotBlockRoots,
       final Map<Checkpoint, BeaconState> checkpointStates,
-      final Set<Checkpoint> prunedCheckpointStates,
-      final HashTree updatedBlockTree) {
+      final Set<Checkpoint> prunedCheckpointStates) {
     this.tx = tx;
     this.finalizedChainData = finalizedChainData;
     this.hotBlocks = hotBlocks;
@@ -60,7 +58,6 @@ class StoreTransactionUpdates {
     this.prunedHotBlockRoots = prunedHotBlockRoots;
     this.checkpointStates = checkpointStates;
     this.prunedCheckpointStates = prunedCheckpointStates;
-    this.updatedBlockTree = updatedBlockTree;
   }
 
   public static StoreTransactionUpdates calculate(final Store baseStore, final Transaction tx) {
@@ -74,16 +71,6 @@ class StoreTransactionUpdates {
     final Optional<CheckpointAndBlock> newFinalizedCheckpoint =
         Optional.of(tx.getFinalizedCheckpointAndBlock())
             .filter(c -> c.getEpoch().compareTo(prevFinalizedCheckpoint.getEpoch()) > 0);
-
-    // Calculate new tree structure
-    final Bytes32 updatedRoot =
-        newFinalizedCheckpoint
-            .map(CheckpointAndBlock::getRoot)
-            .orElse(baseStore.blockTree.getRootHash());
-    HashTree.Builder blockTreeUpdater =
-        baseStore.blockTree.withRoot(updatedRoot).blocks(hotBlocks.values());
-    newFinalizedCheckpoint.ifPresent(finalized -> blockTreeUpdater.block(finalized.getBlock()));
-    final HashTree updatedBlockTree = blockTreeUpdater.build();
 
     // Calculate finalized chain data
     final Optional<FinalizedChainData> finalizedChainData;
@@ -109,6 +96,8 @@ class StoreTransactionUpdates {
                   .finalizedStates(finalizedStates)
                   .build());
 
+      final HashTree updatedBlockTree =
+          buildUpdatedTree(baseStore.blockTree, finalizedCheckpoint.getRoot(), hotBlocks.values());
       prunedHotBlockRoots = calculatePrunedHotBlockRoots(baseStore, tx, updatedBlockTree);
       prunedCheckpoints =
           calculatePrunedCheckpoints(baseStore, tx, finalizedCheckpoint.getCheckpoint());
@@ -130,8 +119,16 @@ class StoreTransactionUpdates {
         hotStates,
         prunedHotBlockRoots,
         checkpointStates,
-        prunedCheckpoints,
-        updatedBlockTree);
+        prunedCheckpoints);
+  }
+
+  private static HashTree buildUpdatedTree(
+      final HashTree baseTree,
+      final Bytes32 updatedRootHash,
+      final Collection<SignedBeaconBlock> newBlocks) {
+    // Calculate new tree structure
+    HashTree.Builder blockTreeUpdater = baseTree.withRoot(updatedRootHash).blocks(newBlocks);
+    return blockTreeUpdater.build();
   }
 
   private static Set<Checkpoint> calculatePrunedCheckpoints(
@@ -202,6 +199,16 @@ class StoreTransactionUpdates {
   }
 
   public void applyToStore(final Store store) {
+    // Calculated updated hash tree again so that we're sure if any blocks were committed between
+    // our pre-calculations and the actual store update, they will be included
+    final Bytes32 updatedRoot =
+        finalizedChainData
+            .map(FinalizedChainData::getFinalizedCheckpoint)
+            .map(Checkpoint::getRoot)
+            .orElse(store.blockTree.getRootHash());
+    final HashTree updatedBlockTree =
+        buildUpdatedTree(store.blockTree, updatedRoot, hotBlocks.values());
+
     // Add new data
     tx.time.ifPresent(value -> store.time = value);
     tx.genesis_time.ifPresent(value -> store.genesis_time = value);
