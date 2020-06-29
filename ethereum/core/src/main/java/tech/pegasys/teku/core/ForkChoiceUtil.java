@@ -337,7 +337,15 @@ public class ForkChoiceUtil {
 
     // Make sure this block descends from the finalized block
     final UnsignedLong finalizedSlot =
-        forkChoiceStrategy.blockSlot(finalizedCheckpoint.getRoot()).orElseThrow();
+        forkChoiceStrategy
+            .blockSlot(finalizedCheckpoint.getRoot())
+            .orElseThrow(
+                () -> {
+                  throw new IllegalStateException(
+                      String.format(
+                          "Missing finalized block for epoch %s (start slot: %s)",
+                          finalizedCheckpoint.getEpoch(), finalizedEpochStartSlot));
+                });
     return hasAncestorAtSlot(
         forkChoiceStrategy, block.getParent_root(), finalizedSlot, finalizedCheckpoint.getRoot());
   }
