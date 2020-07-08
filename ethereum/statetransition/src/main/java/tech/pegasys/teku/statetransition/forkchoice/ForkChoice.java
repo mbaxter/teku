@@ -56,8 +56,8 @@ public class ForkChoice {
   public synchronized Bytes32 processHead(Optional<UnsignedLong> nodeSlot) {
     StoreTransaction transaction = recentChainData.startStoreTransaction();
     final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-    Bytes32 headBlockRoot = forkChoiceStrategy.findHead(transaction);
-    transaction.commit(() -> {}, "Failed to persist validator vote changes.");
+    final Bytes32 headBlockRoot = forkChoiceStrategy.findHead(transaction);
+    transaction.commit().join();
     recentChainData.updateBestBlock(
         headBlockRoot,
         nodeSlot.orElse(
