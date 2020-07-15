@@ -18,6 +18,7 @@ import java.nio.ByteOrder;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSConstants;
 import tech.pegasys.teku.core.BlockProcessorUtil;
 import tech.pegasys.teku.core.StateTransition;
 import tech.pegasys.teku.core.StateTransitionException;
@@ -82,10 +83,9 @@ public class FuzzUtil {
         VoluntaryExitFuzzInput.class, new ReflectionInformation(VoluntaryExitFuzzInput.class));
 
     this.disable_bls = disable_bls;
-    /*if (disable_bls) {
-      // TODO enable/disable BLS verification
-      // TODO implement
-    }*/
+    if (disable_bls) {
+      BLSConstants.disableBLSVerification();
+    }
   }
 
   public Optional<byte[]> fuzzAttestation(final byte[] input) {
