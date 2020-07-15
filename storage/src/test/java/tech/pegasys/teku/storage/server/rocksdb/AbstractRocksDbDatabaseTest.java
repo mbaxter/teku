@@ -13,15 +13,24 @@
 
 package tech.pegasys.teku.storage.server.rocksdb;
 
-import static com.google.common.primitives.UnsignedLong.ONE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.google.common.primitives.UnsignedLong;
+import java.util.stream.Stream;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
-import tech.pegasys.teku.storage.Store.Transaction;
+import tech.pegasys.teku.datastructures.util.DataStructureUtil;
+import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.storage.server.AbstractStorageBackedDatabaseTest;
+import tech.pegasys.teku.storage.server.ShuttingDownException;
+import tech.pegasys.teku.storage.server.rocksdb.dataaccess.RocksDbEth1Dao;
+import tech.pegasys.teku.storage.server.rocksdb.dataaccess.RocksDbFinalizedDao;
+import tech.pegasys.teku.storage.server.rocksdb.dataaccess.RocksDbHotDao;
+import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
 import tech.pegasys.teku.util.async.SafeFuture;
 
 public abstract class AbstractRocksDbDatabaseTest extends AbstractStorageBackedDatabaseTest {
@@ -29,76 +38,131 @@ public abstract class AbstractRocksDbDatabaseTest extends AbstractStorageBackedD
   @Test
   public void shouldThrowIfClosedDatabaseIsModified_setGenesis() throws Exception {
     database.close();
-    assertThatThrownBy(() -> database.storeGenesis(store))
-        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> database.storeGenesis(genesisAnchor))
+        .isInstanceOf(ShuttingDownException.class);
   }
 
   @Test
   public void shouldThrowIfClosedDatabaseIsModified_update() throws Exception {
-    database.storeGenesis(store);
+    database.storeGenesis(genesisAnchor);
     database.close();
 
-    final Checkpoint newValue = checkpoint3;
+    final SignedBlockAndState newValue = chainBuilder.generateBlockAtSlot(1);
     // Sanity check
-    assertThat(store.getFinalizedCheckpoint()).isNotEqualTo(checkpoint3);
-    final Transaction transaction = store.startTransaction(storageUpdateChannel);
-    transaction.setFinalizedCheckpoint(newValue);
+    assertThat(store.getBlockState(newValue.getRoot())).isNull();
+    final StoreTransaction transaction = recentChainData.startStoreTransaction();
+    transaction.putBlockAndState(newValue);
 
     final SafeFuture<Void> result = transaction.commit();
-    assertThatThrownBy(result::get).hasCauseInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(result::get).hasCauseInstanceOf(ShuttingDownException.class);
   }
 
   @Test
   public void shouldThrowIfClosedDatabaseIsRead_createMemoryStore() throws Exception {
-    database.storeGenesis(store);
+    database.storeGenesis(genesisAnchor);
     database.close();
 
-    assertThatThrownBy(database::createMemoryStore).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(database::createMemoryStore).isInstanceOf(ShuttingDownException.class);
   }
 
   @Test
-  public void shouldThrowIfClosedDatabaseIsRead_getFinalizedRootAtSlot() throws Exception {
-    database.storeGenesis(store);
+  public void shouldThrowIfClosedDatabaseIsRead_getSlotForFinalizedBlockRoot() throws Exception {
+    database.storeGenesis(genesisAnchor);
     database.close();
 
-    assertThatThrownBy(() -> database.getFinalizedRootAtSlot(ONE))
-        .isInstanceOf(IllegalStateException.class);
-  }
-
-  @Test
-  public void shouldThrowIfClosedDatabaseIsRead_getLatestFinalizedRootAtSlot() throws Exception {
-    database.storeGenesis(store);
-    database.close();
-
-    assertThatThrownBy(() -> database.getLatestFinalizedRootAtSlot(ONE))
-        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> database.getSlotForFinalizedBlockRoot(Bytes32.ZERO))
+        .isInstanceOf(ShuttingDownException.class);
   }
 
   @Test
   public void shouldThrowIfClosedDatabaseIsRead_getSignedBlock() throws Exception {
-    database.storeGenesis(store);
+    database.storeGenesis(genesisAnchor);
     database.close();
 
     assertThatThrownBy(() -> database.getSignedBlock(genesisCheckpoint.getRoot()))
-        .isInstanceOf(IllegalStateException.class);
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  public void shouldThrowIfClosedDatabaseIsRead_streamFinalizedBlocks() throws Exception {
+    database.storeGenesis(genesisAnchor);
+    database.close();
+
+    assertThatThrownBy(() -> database.streamFinalizedBlocks(UnsignedLong.ZERO, UnsignedLong.ONE))
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  public void shouldThrowIfClosedDatabaseIsRead_streamFinalizedBlocksShuttingDown()
+      throws Exception {
+    database.storeGenesis(genesisAnchor);
+    try (final Stream<SignedBeaconBlock> stream =
+        database.streamFinalizedBlocks(UnsignedLong.ZERO, UnsignedLong.valueOf(1000L))) {
+      database.close();
+      assertThatThrownBy(stream::findAny).isInstanceOf(ShuttingDownException.class);
+    }
+  }
+
+  @Test
+  public void shouldThrowIfTransactionModifiedAfterDatabaseIsClosed_updateHotDao()
+      throws Exception {
+    database.storeGenesis(genesisAnchor);
+
+    try (final RocksDbHotDao.HotUpdater updater =
+        ((RocksDbDatabase) database).hotDao.hotUpdater()) {
+      SignedBlockAndState newBlock = chainBuilder.generateNextBlock();
+      database.close();
+      assertThatThrownBy(() -> updater.addHotBlock(newBlock.getBlock()))
+          .isInstanceOf(ShuttingDownException.class);
+    }
+  }
+
+  @Test
+  public void shouldThrowIfTransactionModifiedAfterDatabaseIsClosed_updateFinalizedDao()
+      throws Exception {
+    database.storeGenesis(genesisAnchor);
+
+    try (final RocksDbFinalizedDao.FinalizedUpdater updater =
+        ((RocksDbDatabase) database).finalizedDao.finalizedUpdater()) {
+      SignedBlockAndState newBlock = chainBuilder.generateNextBlock();
+      database.close();
+      assertThatThrownBy(() -> updater.addFinalizedBlock(newBlock.getBlock()))
+          .isInstanceOf(ShuttingDownException.class);
+    }
+  }
+
+  @Test
+  public void shouldThrowIfTransactionModifiedAfterDatabaseIsClosed_updateEth1Dao()
+      throws Exception {
+    database.storeGenesis(genesisAnchor);
+
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil();
+    try (final RocksDbEth1Dao.Eth1Updater updater =
+        ((RocksDbDatabase) database).eth1Dao.eth1Updater()) {
+      final MinGenesisTimeBlockEvent genesisTimeBlockEvent =
+          dataStructureUtil.randomMinGenesisTimeBlockEvent(1);
+      database.close();
+      assertThatThrownBy(() -> updater.addMinGenesisTimeBlock(genesisTimeBlockEvent))
+          .isInstanceOf(ShuttingDownException.class);
+    }
   }
 
   @Test
   public void shouldThrowIfClosedDatabaseIsRead_getHistoricalState() throws Exception {
     // Store genesis
-    database.storeGenesis(store);
+    database.storeGenesis(genesisAnchor);
     // Add a new finalized block to supersede genesis
-    final SignedBlockAndState newBlock = chainBuilder.getBlockAndStateAtSlot(1);
+    final SignedBlockAndState newBlock = chainBuilder.generateBlockAtSlot(1);
     final Checkpoint newCheckpoint = getCheckpointForBlock(newBlock.getBlock());
-    final Transaction transaction = store.startTransaction(storageUpdateChannel);
-    transaction.putBlock(newBlock.getRoot(), newBlock.getBlock());
-    transaction.putBlockState(newBlock.getRoot(), newBlock.getState());
+    final StoreTransaction transaction = recentChainData.startStoreTransaction();
+    transaction.putBlockAndState(newBlock);
     transaction.setFinalizedCheckpoint(newCheckpoint);
     transaction.commit().reportExceptions();
     // Close db
     database.close();
 
-    assertThatThrownBy(() -> database.getState(genesisCheckpoint.getRoot()))
-        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(
+            () -> database.getLatestAvailableFinalizedState(genesisCheckpoint.getEpochStartSlot()))
+        .isInstanceOf(ShuttingDownException.class);
   }
 }

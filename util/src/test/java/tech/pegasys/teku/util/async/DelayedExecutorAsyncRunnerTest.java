@@ -14,15 +14,20 @@
 package tech.pegasys.teku.util.async;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static tech.pegasys.teku.util.async.SafeFutureTest.assertExceptionallyCompletedWith;
+import static tech.pegasys.teku.util.Waiter.waitFor;
+import static tech.pegasys.teku.util.async.SafeFutureAssert.assertThatSafeFuture;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,7 +84,7 @@ public class DelayedExecutorAsyncRunnerTest {
 
     final RuntimeException exception = new RuntimeException("Nope");
     actionResult.completeExceptionally(exception);
-    assertExceptionallyCompletedWith(result, exception);
+    assertThatSafeFuture(result).isCompletedExceptionallyWith(exception);
   }
 
   @SuppressWarnings("unchecked")
@@ -93,6 +98,64 @@ public class DelayedExecutorAsyncRunnerTest {
     final SafeFuture<String> result = asyncRunner.runAsync(action, executor);
 
     verify(action, never()).get();
-    assertExceptionallyCompletedWith(result, exception);
+    assertThatSafeFuture(result).isCompletedExceptionallyWith(exception);
+  }
+
+  @Test
+  void runAsyc_shouldCompleteExceptionallyWhenSupplierThrowsException() {
+    final RuntimeException exception = new RuntimeException("My bad...");
+    final AtomicReference<Throwable> executorException = new AtomicReference<>();
+    // Real executors use a different thread so exceptions don't propagate back out of execute
+    final Executor executor =
+        action -> {
+          try {
+            action.run();
+          } catch (final Throwable t) {
+            executorException.set(t);
+          }
+        };
+    final Supplier<SafeFuture<String>> action =
+        () -> {
+          throw exception;
+        };
+
+    final SafeFuture<String> result = asyncRunner.runAsync(action, executor);
+
+    assertThat(result).isCompletedExceptionally();
+    assertThatThrownBy(result::join).hasRootCause(exception);
+    assertThat(executorException).hasValue(null);
+  }
+
+  @Test
+  public void testRecurrentTaskCancel() throws Exception {
+    AtomicInteger counter = new AtomicInteger();
+    Cancellable task =
+        asyncRunner.runWithFixedDelay(
+            counter::incrementAndGet, 100, TimeUnit.MILLISECONDS, t -> {});
+    waitFor(() -> assertThat(counter).hasValueGreaterThan(3));
+    task.cancel();
+    int cnt1 = counter.get();
+    Thread.sleep(500);
+    // 1 task may be completing during the cancel() call
+    assertThat(counter).hasValueLessThanOrEqualTo(cnt1 + 1);
+  }
+
+  @Test
+  public void testRecurrentTaskExceptionHandler() {
+    AtomicInteger counter = new AtomicInteger();
+    AtomicReference<Throwable> exception = new AtomicReference<>();
+    Cancellable task =
+        asyncRunner.runWithFixedDelay(
+            () -> {
+              if (counter.incrementAndGet() == 3) {
+                throw new RuntimeException("Ups");
+              }
+            },
+            100,
+            TimeUnit.MILLISECONDS,
+            exception::set);
+    waitFor(() -> assertThat(counter).hasValueGreaterThan(3));
+    assertThat(exception.get()).hasMessageContaining("Ups");
+    task.cancel();
   }
 }

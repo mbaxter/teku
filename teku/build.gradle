@@ -16,6 +16,7 @@ dependencies {
   implementation project(':services:serviceutils')
   implementation project(':services:timer')
   implementation project(':storage')
+  implementation project(':storage:api')
   implementation project(':util')
   implementation project(':validator:coordinator')
   implementation project(':validator:client')
@@ -34,13 +35,13 @@ dependencies {
   implementation 'org.apache.tuweni:tuweni-ssz'
   implementation 'org.apache.tuweni:tuweni-toml'
   implementation 'org.apache.tuweni:tuweni-units'
-  implementation 'org.hyperledger.besu:plugin-api'
   implementation 'org.hyperledger.besu.internal:metrics-core'
   implementation 'tech.pegasys.signers.internal:bls-keystore'
   implementation 'com.fasterxml.jackson.core:jackson-databind'
   implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
 
   testImplementation testFixtures(project(':util'))
+  testImplementation testFixtures(project(':ethereum:datastructures'))
 
   testImplementation 'org.awaitility:awaitility'
 

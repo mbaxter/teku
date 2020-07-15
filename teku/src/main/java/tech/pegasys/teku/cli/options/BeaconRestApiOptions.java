@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.cli.options;
 
+import java.util.Arrays;
+import java.util.List;
 import picocli.CommandLine.Option;
 
 public class BeaconRestApiOptions {
@@ -47,6 +49,14 @@ public class BeaconRestApiOptions {
       arity = "1")
   private String restApiInterface = "127.0.0.1";
 
+  @Option(
+      names = {"--rest-api-host-allowlist"},
+      paramLabel = "<hostname>",
+      description = "Comma-separated list of hostnames to allow, or * to allow any host",
+      split = ",",
+      arity = "0..*")
+  private final List<String> restApiHostAllowlist = Arrays.asList("127.0.0.1", "localhost");
+
   public int getRestApiPort() {
     return restApiPort;
   }
@@ -61,5 +71,9 @@ public class BeaconRestApiOptions {
 
   public String getRestApiInterface() {
     return restApiInterface;
+  }
+
+  public List<String> getRestApiHostAllowlist() {
+    return restApiHostAllowlist;
   }
 }

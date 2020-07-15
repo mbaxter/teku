@@ -13,24 +13,17 @@
 
 package tech.pegasys.teku.storage.api;
 
-import java.util.Optional;
-import tech.pegasys.teku.storage.Store;
+import tech.pegasys.teku.storage.events.AnchorPoint;
 import tech.pegasys.teku.storage.events.StorageUpdate;
-import tech.pegasys.teku.storage.events.StorageUpdateResult;
 import tech.pegasys.teku.util.async.SafeFuture;
 
 public class StubStorageUpdateChannel implements StorageUpdateChannel {
 
   @Override
-  public SafeFuture<Optional<Store>> onStoreRequest() {
-    return SafeFuture.failedFuture(new IllegalStateException("Storage is unavailable."));
+  public SafeFuture<Void> onStorageUpdate(StorageUpdate event) {
+    return SafeFuture.COMPLETE;
   }
 
   @Override
-  public SafeFuture<StorageUpdateResult> onStorageUpdate(StorageUpdate event) {
-    return SafeFuture.completedFuture(StorageUpdateResult.successfulWithNothingPruned());
-  }
-
-  @Override
-  public void onGenesis(Store store) {}
+  public void onGenesis(AnchorPoint genesis) {}
 }

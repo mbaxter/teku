@@ -15,11 +15,13 @@ package tech.pegasys.teku.validator.coordinator;
 
 import static java.util.Collections.emptyList;
 import static java.util.stream.Collectors.toList;
+import static tech.pegasys.teku.datastructures.util.AttestationUtil.get_attesting_indices;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_start_slot_at_epoch;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.get_beacon_proposer_index;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.get_committee_count_at_slot;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.max;
 import static tech.pegasys.teku.datastructures.util.CommitteeUtil.getAggregatorModulo;
+import static tech.pegasys.teku.logging.ValidatorLogger.VALIDATOR_LOGGER;
 import static tech.pegasys.teku.util.config.Constants.GENESIS_SLOT;
 import static tech.pegasys.teku.util.config.Constants.MAX_VALIDATORS_PER_COMMITTEE;
 
@@ -41,6 +43,7 @@ import tech.pegasys.teku.core.CommitteeAssignmentUtil;
 import tech.pegasys.teku.core.StateTransition;
 import tech.pegasys.teku.core.exceptions.EpochProcessingException;
 import tech.pegasys.teku.core.exceptions.SlotProcessingException;
+import tech.pegasys.teku.datastructures.attestation.ValidateableAttestation;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
@@ -48,15 +51,15 @@ import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.operations.AttestationData;
 import tech.pegasys.teku.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.datastructures.state.BeaconState;
-import tech.pegasys.teku.datastructures.state.CommitteeAssignment;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.AttestationUtil;
 import tech.pegasys.teku.datastructures.util.CommitteeUtil;
 import tech.pegasys.teku.datastructures.util.ValidatorsUtil;
 import tech.pegasys.teku.datastructures.validator.SubnetSubscription;
-import tech.pegasys.teku.networking.eth2.gossip.AttestationTopicSubscriber;
+import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationTopicSubscriber;
 import tech.pegasys.teku.ssz.SSZTypes.Bitlist;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
+import tech.pegasys.teku.statetransition.attestation.AttestationManager;
 import tech.pegasys.teku.statetransition.events.block.ProposedBlockEvent;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.sync.SyncStateTracker;
@@ -74,6 +77,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
   private final StateTransition stateTransition;
   private final BlockFactory blockFactory;
   private final AggregatingAttestationPool attestationPool;
+  private final AttestationManager attestationManager;
   private final AttestationTopicSubscriber attestationTopicSubscriber;
   private final EventBus eventBus;
 
@@ -83,6 +87,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
       final StateTransition stateTransition,
       final BlockFactory blockFactory,
       final AggregatingAttestationPool attestationPool,
+      final AttestationManager attestationManager,
       final AttestationTopicSubscriber attestationTopicSubscriber,
       final EventBus eventBus) {
     this.combinedChainDataClient = combinedChainDataClient;
@@ -90,6 +95,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
     this.stateTransition = stateTransition;
     this.blockFactory = blockFactory;
     this.attestationPool = attestationPool;
+    this.attestationManager = attestationManager;
     this.attestationTopicSubscriber = attestationTopicSubscriber;
     this.eventBus = eventBus;
   }
@@ -114,7 +120,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
             epoch.compareTo(UnsignedLong.ZERO) > 0 ? epoch.minus(UnsignedLong.ONE) : epoch);
     LOG.trace("Retrieving duties from epoch {} using state at slot {}", epoch, slot);
     return combinedChainDataClient
-        .getStateAtSlot(slot)
+        .getLatestStateAtSlot(slot)
         .thenApply(
             optionalState ->
                 optionalState
@@ -135,7 +141,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
 
   @Override
   public SafeFuture<Optional<BeaconBlock>> createUnsignedBlock(
-      final UnsignedLong slot, final BLSSignature randaoReveal) {
+      final UnsignedLong slot, final BLSSignature randaoReveal, final Optional<Bytes32> graffiti) {
     if (isSyncActive()) {
       return NodeSyncingException.failedFuture();
     }
@@ -143,24 +149,15 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
         slot.minus(UnsignedLong.ONE),
         blockAndState ->
             blockFactory.createUnsignedBlock(
-                blockAndState.getState(), blockAndState.getBlock(), slot, randaoReveal));
+                blockAndState.getState(), blockAndState.getBlock(), slot, randaoReveal, graffiti));
   }
 
   private <T> SafeFuture<Optional<T>> createFromBlockAndState(
       final UnsignedLong maximumSlot,
       final ExceptionThrowingFunction<BeaconBlockAndState, T> creator) {
-    final Optional<Bytes32> headRoot = combinedChainDataClient.getBestBlockRoot();
-    if (headRoot.isEmpty()) {
-      return SafeFuture.completedFuture(Optional.empty());
-    }
-    final UnsignedLong bestSlot = combinedChainDataClient.getBestSlot();
 
-    // We need to request the block on the canonical chain which is strictly before slot
-    // If slot is past the end of our canonical chain, we need the last block from our chain.
-    final UnsignedLong parentBlockSlot =
-        bestSlot.compareTo(maximumSlot) >= 0 ? maximumSlot : bestSlot;
     return combinedChainDataClient
-        .getBlockAndStateInEffectAtSlot(parentBlockSlot, headRoot.get())
+        .getBlockAndStateInEffectAtSlot(maximumSlot)
         .thenApplyChecked(
             maybeBlockAndState -> {
               if (maybeBlockAndState.isEmpty()) {
@@ -207,7 +204,10 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
     if (isSyncActive()) {
       return NodeSyncingException.failedFuture();
     }
-    return SafeFuture.completedFuture(attestationPool.createAggregateFor(attestationData));
+    return SafeFuture.completedFuture(
+        attestationPool
+            .createAggregateFor(attestationData)
+            .map(ValidateableAttestation::getAttestation));
   }
 
   @Override
@@ -222,15 +222,39 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
+  public void sendSignedAttestation(
+      final Attestation attestation, final Optional<Integer> expectedValidatorIndex) {
+    attestationManager
+        .onAttestation(ValidateableAttestation.fromAttestation(attestation))
+        .ifInvalid(
+            reason -> {
+              int actualValidatorIndex =
+                  get_attesting_indices(
+                          combinedChainDataClient.getHeadStateFromStore().orElseThrow(),
+                          attestation.getData(),
+                          attestation.getAggregation_bits())
+                      .get(0);
+              VALIDATOR_LOGGER.producedInvalidAttestation(
+                  attestation.getData().getSlot(),
+                  actualValidatorIndex,
+                  expectedValidatorIndex,
+                  reason);
+            });
+  }
+
+  @Override
   public void sendSignedAttestation(final Attestation attestation) {
-    attestationPool.add(attestation);
-    eventBus.post(attestation);
+    sendSignedAttestation(attestation, Optional.empty());
   }
 
   @Override
   public void sendAggregateAndProof(final SignedAggregateAndProof aggregateAndProof) {
-    attestationPool.add(aggregateAndProof.getMessage().getAggregate());
-    eventBus.post(aggregateAndProof);
+    attestationManager
+        .onAttestation(ValidateableAttestation.fromSignedAggregate(aggregateAndProof))
+        .ifInvalid(
+            reason ->
+                VALIDATOR_LOGGER.producedInvalidAggregate(
+                    aggregateAndProof.getMessage().getAggregate().getData().getSlot(), reason));
   }
 
   @Override
@@ -272,17 +296,18 @@ public class ValidatorApiHandler implements ValidatorApiChannel {
       final Integer validatorIndex) {
     final List<UnsignedLong> proposerSlots =
         proposalSlotsByValidatorIndex.getOrDefault(validatorIndex, emptyList());
-    final CommitteeAssignment committeeAssignment =
-        CommitteeAssignmentUtil.get_committee_assignment(state, epoch, validatorIndex)
-            .orElseThrow();
-    return ValidatorDuties.withDuties(
-        key,
-        validatorIndex,
-        Math.toIntExact(committeeAssignment.getCommitteeIndex().longValue()),
-        committeeAssignment.getCommittee().indexOf(validatorIndex),
-        getAggregatorModulo(committeeAssignment.getCommittee().size()),
-        proposerSlots,
-        committeeAssignment.getSlot());
+    return CommitteeAssignmentUtil.get_committee_assignment(state, epoch, validatorIndex)
+        .map(
+            committeeAssignment ->
+                ValidatorDuties.withDuties(
+                    key,
+                    validatorIndex,
+                    Math.toIntExact(committeeAssignment.getCommitteeIndex().longValue()),
+                    committeeAssignment.getCommittee().indexOf(validatorIndex),
+                    getAggregatorModulo(committeeAssignment.getCommittee().size()),
+                    proposerSlots,
+                    committeeAssignment.getSlot()))
+        .orElseGet(() -> ValidatorDuties.noDuties(key));
   }
 
   private Map<Integer, List<UnsignedLong>> getBeaconProposalSlotsByValidatorIndex(

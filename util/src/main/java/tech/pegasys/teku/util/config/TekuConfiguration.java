@@ -22,8 +22,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.logging.log4j.status.StatusLogger;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 
 /** Configuration of an instance of Teku. */
@@ -63,15 +66,17 @@ public class TekuConfiguration {
   private final List<String> validatorExternalSignerPublicKeys;
   private final String validatorExternalSignerUrl;
   private final int validatorExternalSignerTimeout;
+  private final Bytes32 graffiti;
 
-  private final boolean eth1Enabled;
   // Deposit
   private final Eth1Address eth1DepositContractAddress;
   private final String eth1Endpoint;
+  private final boolean eth1DepositsFromStorageEnabled;
 
   // Logging
   private final boolean logColorEnabled;
   private final boolean logIncludeEventsEnabled;
+  private final boolean logIncludeValidatorDutiesEnabled;
   private final LoggingDestination logDestination;
   private final String logFile;
   private final String logFileNamePattern;
@@ -88,17 +93,20 @@ public class TekuConfiguration {
   private final int metricsPort;
   private final String metricsInterface;
   private final List<String> metricsCategories;
-  private final List<String> metricsHostWhitelist;
+  private final List<String> metricsHostAllowlist;
 
   // Database
   private final String dataPath;
   private final StateStorageMode dataStorageMode;
+  private final long dataStorageFrequency;
+  private final String dataStorageCreateDbVersion;
 
   // Beacon REST API
   private final int restApiPort;
   private final boolean restApiDocsEnabled;
   private final boolean restApiEnabled;
   private final String restApiInterface;
+  private final List<String> restApiHostAllowlist;
 
   public static TekuConfigurationBuilder builder() {
     return new TekuConfigurationBuilder();
@@ -132,11 +140,12 @@ public class TekuConfiguration {
       final List<String> validatorExternalSignerPublicKeys,
       final String validatorExternalSignerUrl,
       final int validatorExternalSignerTimeout,
-      final boolean eth1Enabled,
       final Eth1Address eth1DepositContractAddress,
       final String eth1Endpoint,
+      final boolean eth1DepositsFromStorageEnabled,
       final boolean logColorEnabled,
       final boolean logIncludeEventsEnabled,
+      final boolean logIncludeValidatorDutiesEnabled,
       final LoggingDestination logDestination,
       final String logFile,
       final String logFileNamePattern,
@@ -149,13 +158,17 @@ public class TekuConfiguration {
       final int metricsPort,
       final String metricsInterface,
       final List<String> metricsCategories,
-      final List<String> metricsHostWhitelist,
+      final List<String> metricsHostAllowlist,
       final String dataPath,
       final StateStorageMode dataStorageMode,
+      final long dataStorageFrequency,
+      final String dataStorageCreateDbVersion,
       final int restApiPort,
       final boolean restApiDocsEnabled,
       final boolean restApiEnabled,
-      final String restApiInterface) {
+      final String restApiInterface,
+      final List<String> restApiHostAllowlist,
+      final Bytes32 graffiti) {
     this.constants = constants;
     this.startupTargetPeerCount = startupTargetPeerCount;
     this.startupTimeoutSeconds = startupTimeoutSeconds;
@@ -183,11 +196,12 @@ public class TekuConfiguration {
     this.validatorExternalSignerPublicKeys = validatorExternalSignerPublicKeys;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
     this.validatorExternalSignerTimeout = validatorExternalSignerTimeout;
-    this.eth1Enabled = eth1Enabled;
     this.eth1DepositContractAddress = eth1DepositContractAddress;
     this.eth1Endpoint = eth1Endpoint;
+    this.eth1DepositsFromStorageEnabled = eth1DepositsFromStorageEnabled;
     this.logColorEnabled = logColorEnabled;
     this.logIncludeEventsEnabled = logIncludeEventsEnabled;
+    this.logIncludeValidatorDutiesEnabled = logIncludeValidatorDutiesEnabled;
     this.logDestination = logDestination;
     this.logFile = logFile;
     this.logFileNamePattern = logFileNamePattern;
@@ -200,13 +214,17 @@ public class TekuConfiguration {
     this.metricsPort = metricsPort;
     this.metricsInterface = metricsInterface;
     this.metricsCategories = metricsCategories;
-    this.metricsHostWhitelist = metricsHostWhitelist;
+    this.metricsHostAllowlist = metricsHostAllowlist;
     this.dataPath = dataPath;
     this.dataStorageMode = dataStorageMode;
+    this.dataStorageFrequency = dataStorageFrequency;
+    this.dataStorageCreateDbVersion = dataStorageCreateDbVersion;
     this.restApiPort = restApiPort;
     this.restApiDocsEnabled = restApiDocsEnabled;
     this.restApiEnabled = restApiEnabled;
     this.restApiInterface = restApiInterface;
+    this.restApiHostAllowlist = restApiHostAllowlist;
+    this.graffiti = graffiti;
   }
 
   public String getConstants() {
@@ -259,6 +277,10 @@ public class TekuConfiguration {
 
   public int getP2pPeerUpperBound() {
     return p2pPeerUpperBound;
+  }
+
+  public int getMinimumRandomlySelectedPeerCount() {
+    return Math.min(1, p2pPeerLowerBound * 2 / 10);
   }
 
   public List<String> getP2pStaticPeers() {
@@ -335,7 +357,7 @@ public class TekuConfiguration {
   }
 
   public boolean isEth1Enabled() {
-    return eth1Enabled;
+    return !StringUtils.isEmpty(eth1Endpoint);
   }
 
   public Eth1Address getEth1DepositContractAddress() {
@@ -346,12 +368,20 @@ public class TekuConfiguration {
     return eth1Endpoint;
   }
 
+  public boolean isEth1DepositsFromStorageEnabled() {
+    return eth1DepositsFromStorageEnabled;
+  }
+
   public boolean isLogColorEnabled() {
     return logColorEnabled;
   }
 
   public boolean isLogIncludeEventsEnabled() {
     return logIncludeEventsEnabled;
+  }
+
+  public boolean isLogIncludeValidatorDutiesEnabled() {
+    return logIncludeValidatorDutiesEnabled;
   }
 
   public LoggingDestination getLogDestination() {
@@ -402,8 +432,8 @@ public class TekuConfiguration {
     return metricsCategories;
   }
 
-  public List<String> getMetricsHostWhitelist() {
-    return metricsHostWhitelist;
+  public List<String> getMetricsHostAllowlist() {
+    return metricsHostAllowlist;
   }
 
   public String getDataPath() {
@@ -412,6 +442,14 @@ public class TekuConfiguration {
 
   public StateStorageMode getDataStorageMode() {
     return dataStorageMode;
+  }
+
+  public long getDataStorageFrequency() {
+    return dataStorageFrequency;
+  }
+
+  public String getDataStorageCreateDbVersion() {
+    return dataStorageCreateDbVersion;
   }
 
   public int getRestApiPort() {
@@ -430,6 +468,14 @@ public class TekuConfiguration {
     return restApiInterface;
   }
 
+  public List<String> getRestApiHostAllowlist() {
+    return restApiHostAllowlist;
+  }
+
+  public Bytes32 getGraffiti() {
+    return graffiti;
+  }
+
   public List<Pair<Path, Path>> getValidatorKeystorePasswordFilePairs() {
     final List<String> keystoreFiles = getValidatorKeystoreFiles();
     final List<String> keystorePasswordFiles = getValidatorKeystorePasswordFiles();
@@ -438,7 +484,7 @@ public class TekuConfiguration {
       return null;
     }
 
-    validateKeyStoreFilesAndPasswordFilesSize();
+    validateKeyStoreFilesAndPasswordFilesConfig();
 
     final List<Pair<Path, Path>> keystoreFilePasswordFilePairs = new ArrayList<>();
     for (int i = 0; i < keystoreFiles.size(); i++) {
@@ -456,17 +502,30 @@ public class TekuConfiguration {
               "Invalid configuration. Interop number of validators [%d] must be greater than or equal to [%d]",
               interopNumberOfValidators, Constants.SLOTS_PER_EPOCH));
     }
-    validateKeyStoreFilesAndPasswordFilesSize();
+    validateKeyStoreFilesAndPasswordFilesConfig();
   }
 
-  private void validateKeyStoreFilesAndPasswordFilesSize() {
+  private void validateKeyStoreFilesAndPasswordFilesConfig() {
     final List<String> validatorKeystoreFiles = getValidatorKeystoreFiles();
     final List<String> validatorKeystorePasswordFiles = getValidatorKeystorePasswordFiles();
 
+    if ((validatorKeystoreFiles != null && validatorKeystorePasswordFiles == null)
+        || (validatorKeystoreFiles == null && validatorKeystorePasswordFiles != null)) {
+      final String errorMessage =
+          "Invalid configuration. '--validators-key-files' and '--validators-key-password-files' must be specified together";
+      throw new InvalidConfigurationException(errorMessage);
+    }
+
     if (validatorKeystoreFiles.size() != validatorKeystorePasswordFiles.size()) {
+      StatusLogger.getLogger()
+          .debug(
+              "Invalid configuration. The size of validator.validatorsKeystoreFiles {} and validator.validatorsKeystorePasswordFiles {} must match",
+              validatorKeystoreFiles.size(),
+              validatorKeystorePasswordFiles.size());
+
       final String errorMessage =
           String.format(
-              "Invalid configuration. The size of validator.validatorsKeystoreFiles [%d] and validator.validatorsKeystorePasswordFiles [%d] must match",
+              "Invalid configuration. The number of --validators-key-files (%d) must equal the number of --validators-key-password-files (%d)",
               validatorKeystoreFiles.size(), validatorKeystorePasswordFiles.size());
       throw new InvalidConfigurationException(errorMessage);
     }

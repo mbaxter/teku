@@ -32,6 +32,7 @@ import tech.pegasys.teku.metrics.TekuMetricCategory;
 import tech.pegasys.teku.networking.p2p.connection.ReputationManager;
 import tech.pegasys.teku.networking.p2p.libp2p.rpc.RpcHandler;
 import tech.pegasys.teku.networking.p2p.network.PeerHandler;
+import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.networking.p2p.peer.PeerConnectedSubscriber;
@@ -45,7 +46,9 @@ public class PeerManager implements ConnectionHandler {
 
   private final Map<RpcMethod, RpcHandler> rpcHandlers;
 
-  private ConcurrentHashMap<NodeId, Peer> connectedPeerMap = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<NodeId, Peer> connectedPeerMap = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<NodeId, SafeFuture<Peer>> pendingConnections =
+      new ConcurrentHashMap<>();
   private final ReputationManager reputationManager;
   private final List<PeerHandler> peerHandlers;
 
@@ -79,6 +82,10 @@ public class PeerManager implements ConnectionHandler {
   }
 
   public SafeFuture<Peer> connect(final MultiaddrPeerAddress peer, final Network network) {
+    return pendingConnections.computeIfAbsent(peer.getId(), __ -> doConnect(peer, network));
+  }
+
+  private SafeFuture<Peer> doConnect(final MultiaddrPeerAddress peer, final Network network) {
     LOG.debug("Connecting to {}", peer);
 
     return SafeFuture.of(() -> network.connect(peer.getMultiaddr()))
@@ -103,7 +110,8 @@ public class PeerManager implements ConnectionHandler {
               return connectedPeer;
             })
         .exceptionallyCompose(this::handleConcurrentConnectionInitiation)
-        .catchAndRethrow(error -> reputationManager.reportInitiatedConnectionFailed(peer));
+        .catchAndRethrow(error -> reputationManager.reportInitiatedConnectionFailed(peer))
+        .whenComplete((result, error) -> pendingConnections.remove(peer.getId()));
   }
 
   private CompletionStage<Peer> handleConcurrentConnectionInitiation(final Throwable error) {
@@ -124,17 +132,20 @@ public class PeerManager implements ConnectionHandler {
       LOG.debug("onConnectedPeer() {}", peer.getId());
       peerHandlers.forEach(h -> h.onConnect(peer));
       connectSubscribers.forEach(c -> c.onConnected(peer));
-      peer.subscribeDisconnect(() -> onDisconnectedPeer(peer));
+      peer.subscribeDisconnect(
+          (reason, locallyInitiated) -> onDisconnectedPeer(peer, reason, locallyInitiated));
     } else {
       LOG.trace("Disconnecting duplicate connection to {}", peer::getId);
+      peer.disconnectImmediately(Optional.empty(), true);
       throw new PeerAlreadyConnectedException(peer);
     }
   }
 
-  @VisibleForTesting
-  void onDisconnectedPeer(Peer peer) {
+  private void onDisconnectedPeer(
+      final Peer peer, final Optional<DisconnectReason> reason, final boolean locallyInitiated) {
     if (connectedPeerMap.remove(peer.getId()) != null) {
       LOG.debug("Peer disconnected: {}", peer.getId());
+      reputationManager.reportDisconnection(peer.getAddress(), reason, locallyInitiated);
       peerHandlers.forEach(h -> h.onDisconnect(peer));
     }
   }
@@ -145,26 +156,5 @@ public class PeerManager implements ConnectionHandler {
 
   public int getPeerCount() {
     return connectedPeerMap.size();
-  }
-
-  /**
-   * Indicates that two connections to the same PeerID were incorrectly established.
-   *
-   * <p>LibP2P usually detects attempts to establish multiple connections at the same time, but if
-   * we have incoming and outgoing connections simultaneously to the same peer, sometimes it slips
-   * through. In that case this exception is thrown so that the new connection is terminated before
-   * handshakes complete and we are able to identify the situation and return the existing peer.
-   */
-  private static class PeerAlreadyConnectedException extends RuntimeException {
-    private final Peer peer;
-
-    public PeerAlreadyConnectedException(final Peer peer) {
-      super("Already connected to peer " + peer.getId().toBase58());
-      this.peer = peer;
-    }
-
-    public Peer getPeer() {
-      return peer;
-    }
   }
 }

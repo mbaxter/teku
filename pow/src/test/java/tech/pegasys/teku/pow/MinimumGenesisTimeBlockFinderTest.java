@@ -37,7 +37,7 @@ public class MinimumGenesisTimeBlockFinderTest {
   @BeforeAll
   static void setUp() {
     // Setup so genesis time for a block will be blockTime + 2
-    Constants.MIN_GENESIS_DELAY = 1;
+    Constants.GENESIS_DELAY = UnsignedLong.valueOf(2);
   }
 
   @AfterAll
@@ -82,7 +82,8 @@ public class MinimumGenesisTimeBlockFinderTest {
       final Block[] blocks, final long minGenesisTime, final Block expectedMinGenesisTimeBlock) {
     Constants.MIN_GENESIS_TIME = UnsignedLong.valueOf(minGenesisTime);
     final SafeFuture<Block> result =
-        minimumGenesisTimeBlockFinder.findMinGenesisTimeBlockInHistory(blocks[blocks.length - 1]);
+        minimumGenesisTimeBlockFinder.findMinGenesisTimeBlockInHistory(
+            blocks[blocks.length - 1].getNumber());
     assertThat(result).isCompletedWithValue(expectedMinGenesisTimeBlock);
   }
 
@@ -99,7 +100,7 @@ public class MinimumGenesisTimeBlockFinderTest {
     when(block.getTimestamp()).thenReturn(BigInteger.valueOf(timestamp));
     when(block.getNumber()).thenReturn(BigInteger.valueOf(blockNumber));
     when(block.toString()).thenReturn("Block " + blockNumber + " at timestamp " + timestamp);
-    when(eth1Provider.getEth1BlockFuture(UnsignedLong.valueOf(blockNumber)))
+    when(eth1Provider.getEth1Block(UnsignedLong.valueOf(blockNumber)))
         .thenReturn(SafeFuture.completedFuture(block));
     return block;
   }

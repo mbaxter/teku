@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.protoarray;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static java.lang.Math.addExact;
 import static java.lang.Math.subtractExact;
@@ -29,6 +28,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -37,6 +37,7 @@ import tech.pegasys.teku.datastructures.forkchoice.MutableStore;
 import tech.pegasys.teku.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.datastructures.operations.IndexedAttestation;
+import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
 import tech.pegasys.teku.util.config.Constants;
 
@@ -47,27 +48,38 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
   private final ReadWriteLock votesLock = new ReentrantReadWriteLock();
   private final ReadWriteLock balancesLock = new ReentrantReadWriteLock();
   private final ProtoArray protoArray;
+  private final ProtoArrayStorageChannel storageChannel;
 
   private List<UnsignedLong> balances;
 
-  private ProtoArrayForkChoiceStrategy(ProtoArray protoArray, List<UnsignedLong> balances) {
+  private ProtoArrayForkChoiceStrategy(
+      ProtoArray protoArray,
+      List<UnsignedLong> balances,
+      ProtoArrayStorageChannel protoArrayStorageChannel) {
     this.protoArray = protoArray;
     this.balances = balances;
+    this.storageChannel = protoArrayStorageChannel;
   }
 
   // Public
-  public static ProtoArrayForkChoiceStrategy create(ReadOnlyStore store) {
+  public static ProtoArrayForkChoiceStrategy initialize(
+      ReadOnlyStore store, ProtoArrayStorageChannel storageChannel) {
     ProtoArray protoArray =
-        new ProtoArray(
-            Constants.PROTOARRAY_FORKCHOICE_PRUNE_THRESHOLD,
-            store.getJustifiedCheckpoint().getEpoch(),
-            store.getFinalizedCheckpoint().getEpoch(),
-            new ArrayList<>(),
-            new HashMap<>());
+        storageChannel
+            .getProtoArraySnapshot()
+            .join()
+            .map(ProtoArraySnapshot::toProtoArray)
+            .orElse(
+                new ProtoArray(
+                    Constants.PROTOARRAY_FORKCHOICE_PRUNE_THRESHOLD,
+                    store.getJustifiedCheckpoint().getEpoch(),
+                    store.getFinalizedCheckpoint().getEpoch(),
+                    new ArrayList<>(),
+                    new HashMap<>()));
 
     processBlocksInStoreAtStartup(store, protoArray);
 
-    return new ProtoArrayForkChoiceStrategy(protoArray, new ArrayList<>());
+    return new ProtoArrayForkChoiceStrategy(protoArray, new ArrayList<>(), storageChannel);
   }
 
   @Override
@@ -78,7 +90,7 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
         justifiedCheckpoint.getEpoch(),
         justifiedCheckpoint.getRoot(),
         store.getFinalizedCheckpoint().getEpoch(),
-        store.getCheckpointState(justifiedCheckpoint).getBalances().asList());
+        store.getCheckpointState(justifiedCheckpoint).orElseThrow().getBalances().asList());
   }
 
   @Override
@@ -101,15 +113,25 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
   }
 
   @Override
-  public void onBlock(final ReadOnlyStore store, final BeaconBlock block) {
+  public void onBlock(final BeaconBlock block, final BeaconState state) {
     Bytes32 blockRoot = block.hash_tree_root();
     processBlock(
         block.getSlot(),
         blockRoot,
         block.getParent_root(),
         block.getState_root(),
-        store.getBlockState(blockRoot).getCurrent_justified_checkpoint().getEpoch(),
-        store.getBlockState(blockRoot).getFinalized_checkpoint().getEpoch());
+        state.getCurrent_justified_checkpoint().getEpoch(),
+        state.getFinalized_checkpoint().getEpoch());
+  }
+
+  @Override
+  public void save() {
+    protoArrayLock.readLock().lock();
+    try {
+      storageChannel.onProtoArrayUpdate(ProtoArraySnapshot.create(protoArray));
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
   }
 
   public void maybePrune(Bytes32 finalizedRoot) {
@@ -123,7 +145,11 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
 
   // Internal
   private static void processBlocksInStoreAtStartup(ReadOnlyStore store, ProtoArray protoArray) {
+    List<Bytes32> alreadyIncludedBlockRoots =
+        protoArray.getNodes().stream().map(ProtoNode::getBlockRoot).collect(Collectors.toList());
+
     store.getBlockRoots().stream()
+        .filter(root -> !alreadyIncludedBlockRoots.contains(root))
         .map(store::getBlock)
         .sorted(Comparator.comparing(BeaconBlock::getSlot))
         .forEach(block -> processBlockAtStartup(store, protoArray, block));
@@ -135,9 +161,7 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
     protoArray.onBlock(
         block.getSlot(),
         blockRoot,
-        store.getBlockRoots().contains(block.getParent_root())
-            ? Optional.of(block.getParent_root())
-            : Optional.empty(),
+        block.getParent_root(),
         block.getState_root(),
         store.getBlockState(block.hash_tree_root()).getCurrent_justified_checkpoint().getEpoch(),
         store.getBlockState(block.hash_tree_root()).getFinalized_checkpoint().getEpoch());
@@ -166,7 +190,7 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
     protoArrayLock.writeLock().lock();
     try {
       protoArray.onBlock(
-          blockSlot, blockRoot, Optional.of(parentRoot), stateRoot, justifiedEpoch, finalizedEpoch);
+          blockSlot, blockRoot, parentRoot, stateRoot, justifiedEpoch, finalizedEpoch);
     } finally {
       protoArrayLock.writeLock().unlock();
     }
@@ -216,7 +240,8 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
     }
   }
 
-  public boolean containsBlock(Bytes32 blockRoot) {
+  @Override
+  public boolean contains(Bytes32 blockRoot) {
     protoArrayLock.readLock().lock();
     try {
       return protoArray.getIndices().containsKey(blockRoot);
@@ -225,25 +250,35 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
     }
   }
 
+  @Override
   public Optional<UnsignedLong> blockSlot(Bytes32 blockRoot) {
-    return blockSlotAndStateRoot(blockRoot).map(BlockSlotAndStateRoot::getBlockSlot);
-  }
-
-  public Optional<BlockSlotAndStateRoot> blockSlotAndStateRoot(Bytes32 blockRoot) {
     protoArrayLock.readLock().lock();
     try {
-      int blockIndex =
-          checkNotNull(
-              protoArray.getIndices().get(blockRoot), "ProtoArrayForkChoice: Unknown block root");
-      if (blockIndex >= protoArray.getNodes().size()) {
-        return Optional.empty();
-      } else {
-        ProtoNode node = protoArray.getNodes().get(blockIndex);
-        return Optional.of(new BlockSlotAndStateRoot(node.getBlockSlot(), node.getStateRoot()));
-      }
+      return getProtoNode(blockRoot).map(ProtoNode::getBlockSlot);
     } finally {
       protoArrayLock.readLock().unlock();
     }
+  }
+
+  @Override
+  public Optional<Bytes32> blockParentRoot(Bytes32 blockRoot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getProtoNode(blockRoot).map(ProtoNode::getParentRoot);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  private Optional<ProtoNode> getProtoNode(Bytes32 blockRoot) {
+    return Optional.ofNullable(protoArray.getIndices().get(blockRoot))
+        .flatMap(
+            blockIndex -> {
+              if (blockIndex < protoArray.getNodes().size()) {
+                return Optional.of(protoArray.getNodes().get(blockIndex));
+              }
+              return Optional.empty();
+            });
   }
 
   /**
@@ -327,23 +362,5 @@ public class ProtoArrayForkChoiceStrategy implements ForkChoiceStrategy {
       }
     }
     return deltas;
-  }
-
-  public static class BlockSlotAndStateRoot {
-    private final UnsignedLong blockSlot;
-    private final Bytes32 stateRoot;
-
-    public BlockSlotAndStateRoot(UnsignedLong blockSlot, Bytes32 stateRoot) {
-      this.blockSlot = blockSlot;
-      this.stateRoot = stateRoot;
-    }
-
-    public UnsignedLong getBlockSlot() {
-      return blockSlot;
-    }
-
-    public Bytes32 getStateRoot() {
-      return stateRoot;
-    }
   }
 }

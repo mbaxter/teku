@@ -14,21 +14,18 @@
 package tech.pegasys.teku.core;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static tech.pegasys.teku.util.async.SafeFuture.reportExceptions;
-import static tech.pegasys.teku.util.config.Constants.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_HISTORICAL_ROOT;
 import static tech.pegasys.teku.util.config.Constants.ZERO_HASH;
 
 import com.google.common.primitives.UnsignedLong;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.core.blockvalidator.BatchBlockValidator;
 import tech.pegasys.teku.core.blockvalidator.BlockValidator;
 import tech.pegasys.teku.core.blockvalidator.BlockValidator.BlockValidationResult;
+import tech.pegasys.teku.core.epoch.EpochProcessor;
 import tech.pegasys.teku.core.exceptions.BlockProcessingException;
 import tech.pegasys.teku.core.exceptions.EpochProcessingException;
 import tech.pegasys.teku.core.exceptions.SlotProcessingException;
@@ -36,8 +33,6 @@ import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.state.BeaconState;
-import tech.pegasys.teku.datastructures.util.BeaconStateUtil;
-import tech.pegasys.teku.metrics.EpochMetrics;
 
 public class StateTransition {
 
@@ -47,23 +42,13 @@ public class StateTransition {
     return new BatchBlockValidator();
   }
 
-  private final Optional<EpochMetrics> epochMetrics;
   private final BlockValidator blockValidator;
 
   public StateTransition() {
-    this(Optional.empty(), createDefaultBlockValidator());
-  }
-
-  public StateTransition(EpochMetrics epochMetrics) {
-    this(Optional.of(epochMetrics), createDefaultBlockValidator());
+    this(createDefaultBlockValidator());
   }
 
   public StateTransition(BlockValidator blockValidator) {
-    this(Optional.empty(), blockValidator);
-  }
-
-  private StateTransition(Optional<EpochMetrics> epochMetrics, BlockValidator blockValidator) {
-    this.epochMetrics = epochMetrics;
     this.blockValidator = blockValidator;
   }
 
@@ -134,29 +119,6 @@ public class StateTransition {
   /**
    * v0.7.1
    * https://github.com/ethereum/eth2.0-specs/blob/v0.7.1/specs/core/0_beacon-chain.md#beacon-chain-state-transition-function
-   * Processes epoch
-   *
-   * @throws EpochProcessingException
-   */
-  private static BeaconState process_epoch(BeaconState preState) throws EpochProcessingException {
-    return preState.updated(
-        state -> {
-          // Note: the lines with @ label here will be inserted here in a future phase
-          EpochProcessorUtil.process_justification_and_finalization(state);
-          EpochProcessorUtil.process_rewards_and_penalties(state);
-          EpochProcessorUtil.process_registry_updates(state);
-          // @process_reveal_deadlines
-          // @process_challenge_deadlines
-          EpochProcessorUtil.process_slashings(state);
-          // @update_period_committee
-          EpochProcessorUtil.process_final_updates(state);
-          // @after_process_final_updates
-        });
-  }
-
-  /**
-   * v0.7.1
-   * https://github.com/ethereum/eth2.0-specs/blob/v0.7.1/specs/core/0_beacon-chain.md#beacon-chain-state-transition-function
    * Processes slot
    */
   private static BeaconState process_slot(BeaconState preState) {
@@ -199,7 +161,7 @@ public class StateTransition {
       throws SlotProcessingException, EpochProcessingException {
     try {
       checkArgument(
-          preState.getSlot().compareTo(slot) <= 0,
+          preState.getSlot().compareTo(slot) < 0,
           "process_slots: State slot %s higher than given slot %s",
           preState.getSlot(),
           slot);
@@ -212,9 +174,7 @@ public class StateTransition {
             .plus(UnsignedLong.ONE)
             .mod(UnsignedLong.valueOf(SLOTS_PER_EPOCH))
             .equals(UnsignedLong.ZERO)) {
-          BeaconState epochState = process_epoch(state);
-          reportExceptions(CompletableFuture.runAsync(() -> recordMetrics(epochState)));
-          state = epochState;
+          state = EpochProcessor.processEpoch(state);
         }
         state = state.updated(s -> s.setSlot(s.getSlot().plus(UnsignedLong.ONE)));
       }
@@ -223,24 +183,5 @@ public class StateTransition {
       LOG.warn(e.getMessage(), e);
       throw new SlotProcessingException(e);
     }
-  }
-
-  private synchronized void recordMetrics(BeaconState state) {
-    epochMetrics.ifPresent(
-        metrics -> {
-          final UnsignedLong currentEpoch = BeaconStateUtil.get_current_epoch(state);
-          long pendingExits =
-              state.getValidators().stream()
-                  .filter(
-                      v ->
-                          !v.getExit_epoch().equals(FAR_FUTURE_EPOCH)
-                              && currentEpoch.compareTo(v.getExit_epoch()) < 0)
-                  .count();
-
-          metrics.onEpoch(
-              state.getPrevious_epoch_attestations().size(),
-              state.getCurrent_epoch_attestations().size(),
-              pendingExits);
-        });
   }
 }

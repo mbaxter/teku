@@ -16,12 +16,14 @@ package tech.pegasys.teku.networking.p2p.libp2p;
 import io.libp2p.core.Connection;
 import io.libp2p.core.PeerId;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.networking.p2p.libp2p.rpc.RpcHandler;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
+import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectRequestHandler;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
@@ -39,9 +41,11 @@ public class LibP2PPeer implements Peer {
   private final AtomicBoolean connected = new AtomicBoolean(true);
   private final MultiaddrPeerAddress peerAddress;
 
+  private volatile Optional<DisconnectReason> disconnectReason = Optional.empty();
+  private volatile boolean disconnectLocallyInitiated = false;
   private volatile DisconnectRequestHandler disconnectRequestHandler =
       reason -> {
-        disconnectImmediately();
+        disconnectImmediately(Optional.of(reason), true);
         return SafeFuture.COMPLETE;
       };
 
@@ -52,7 +56,12 @@ public class LibP2PPeer implements Peer {
     final PeerId peerId = connection.secureSession().getRemoteId();
     final NodeId nodeId = new LibP2PNodeId(peerId);
     peerAddress = new MultiaddrPeerAddress(nodeId, connection.remoteAddress());
-    SafeFuture.of(connection.closeFuture()).finish(this::handleConnectionClosed);
+    SafeFuture.of(connection.closeFuture())
+        .finish(
+            this::handleConnectionClosed,
+            error ->
+                LOG.trace(
+                    "Peer {} connection close future completed exceptionally", peerId, error));
   }
 
   @Override
@@ -66,22 +75,30 @@ public class LibP2PPeer implements Peer {
   }
 
   @Override
-  @SuppressWarnings("FutureReturnValueIgnored")
-  public void disconnectImmediately() {
+  public void disconnectImmediately(
+      final Optional<DisconnectReason> reason, final boolean locallyInitiated) {
     connected.set(false);
-    connection.close();
+    disconnectReason = reason;
+    disconnectLocallyInitiated = locallyInitiated;
+    SafeFuture.of(connection.close())
+        .finish(
+            () -> LOG.trace("Disconnected from {}", getId()),
+            error -> LOG.warn("Failed to disconnect from peer {}", getId(), error));
   }
 
   @Override
-  public void disconnectCleanly(final DisconnectRequestHandler.DisconnectReason reason) {
+  public void disconnectCleanly(final DisconnectReason reason) {
     connected.set(false);
+    disconnectReason = Optional.of(reason);
+    disconnectLocallyInitiated = true;
     disconnectRequestHandler
         .requestDisconnect(reason)
         .finish(
-            this::disconnectImmediately, // Request sent now close our side
+            () ->
+                disconnectImmediately(Optional.of(reason), true), // Request sent now close our side
             error -> {
               LOG.debug("Failed to disconnect from " + getId() + " cleanly.", error);
-              disconnectImmediately();
+              disconnectImmediately(Optional.of(reason), true);
             });
   }
 
@@ -92,7 +109,8 @@ public class LibP2PPeer implements Peer {
 
   @Override
   public void subscribeDisconnect(final PeerDisconnectedSubscriber subscriber) {
-    SafeFuture.of(connection.closeFuture()).finish(subscriber::onDisconnected);
+    SafeFuture.of(connection.closeFuture())
+        .always(() -> subscriber.onDisconnected(disconnectReason, disconnectLocallyInitiated));
   }
 
   @Override

@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import okhttp3.OkHttpClient;
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
-import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
+import tech.pegasys.teku.networking.eth2.Eth2Network;
 import tech.pegasys.teku.statetransition.blockimport.BlockImporter;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -41,15 +42,22 @@ import tech.pegasys.teku.sync.SyncService;
 import tech.pegasys.teku.util.config.TekuConfiguration;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 
+/** @deprecated - use {@link AbstractDataBackedRestAPIIntegrationTest} */
+@Deprecated
 public abstract class AbstractBeaconRestAPIIntegrationTest {
   static final okhttp3.MediaType JSON = okhttp3.MediaType.parse("application/json; charset=utf-8");
   static final TekuConfiguration config =
-      TekuConfiguration.builder().setRestApiPort(0).setRestApiDocsEnabled(false).build();
+      TekuConfiguration.builder()
+          .setRestApiPort(0)
+          .setRestApiEnabled(true)
+          .setRestApiDocsEnabled(false)
+          .setRestApiHostAllowlist(List.of("127.0.0.1", "localhost"))
+          .build();
 
   protected final DataStructureUtil dataStructureUtil = new DataStructureUtil();
   protected final ObjectMapper objectMapper = new ObjectMapper();
 
-  protected final P2PNetwork<?> p2PNetwork = mock(P2PNetwork.class);
+  protected final Eth2Network eth2Network = mock(Eth2Network.class);
   protected StorageQueryChannel historicalChainData = mock(StorageQueryChannel.class);
   protected RecentChainData recentChainData = mock(RecentChainData.class);
   protected final SyncService syncService = mock(SyncService.class);
@@ -68,7 +76,7 @@ public abstract class AbstractBeaconRestAPIIntegrationTest {
         new DataProvider(
             recentChainData,
             combinedChainDataClient,
-            p2PNetwork,
+            eth2Network,
             syncService,
             validatorApiChannel,
             blockImporter);

@@ -13,17 +13,13 @@
 
 package tech.pegasys.teku.storage.api;
 
-import java.util.Optional;
-import tech.pegasys.teku.storage.Store;
+import tech.pegasys.teku.storage.events.AnchorPoint;
 import tech.pegasys.teku.storage.events.StorageUpdate;
-import tech.pegasys.teku.storage.events.StorageUpdateResult;
 import tech.pegasys.teku.util.async.SafeFuture;
 
 public interface StorageUpdateChannel {
 
-  SafeFuture<Optional<Store>> onStoreRequest();
+  SafeFuture<Void> onStorageUpdate(StorageUpdate event);
 
-  SafeFuture<StorageUpdateResult> onStorageUpdate(StorageUpdate event);
-
-  void onGenesis(Store store);
+  void onGenesis(AnchorPoint genesis);
 }

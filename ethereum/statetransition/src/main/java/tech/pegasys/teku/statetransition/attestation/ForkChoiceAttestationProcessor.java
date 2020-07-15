@@ -13,11 +13,12 @@
 
 package tech.pegasys.teku.statetransition.attestation;
 
-import tech.pegasys.teku.core.results.AttestationProcessingResult;
-import tech.pegasys.teku.datastructures.operations.Attestation;
+import tech.pegasys.teku.datastructures.attestation.ValidateableAttestation;
+import tech.pegasys.teku.datastructures.operations.IndexedAttestation;
+import tech.pegasys.teku.datastructures.util.AttestationProcessingResult;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
-import tech.pegasys.teku.storage.Store;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
 
 public class ForkChoiceAttestationProcessor {
 
@@ -30,12 +31,18 @@ public class ForkChoiceAttestationProcessor {
     this.forkChoice = forkChoice;
   }
 
-  public AttestationProcessingResult processAttestation(final Attestation attestation) {
-    final Store.Transaction transaction = recentChainData.startStoreTransaction();
+  public AttestationProcessingResult processAttestation(final ValidateableAttestation attestation) {
+    final StoreTransaction transaction = recentChainData.startStoreTransaction();
     final AttestationProcessingResult result = forkChoice.onAttestation(transaction, attestation);
     if (result.isSuccessful()) {
       transaction.commit(() -> {}, "Failed to persist attestation result");
     }
     return result;
+  }
+
+  public void applyIndexedAttestationToForkChoice(final IndexedAttestation attestation) {
+    final StoreTransaction transaction = recentChainData.startStoreTransaction();
+    forkChoice.applyIndexedAttestation(transaction, attestation);
+    transaction.commit(() -> {}, "Failed to persist attestation result");
   }
 }

@@ -23,9 +23,10 @@ import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 
-class ProtoArray {
+public class ProtoArray {
 
   private int pruneThreshold;
+
   private UnsignedLong justifiedEpoch;
   private UnsignedLong finalizedEpoch;
 
@@ -63,7 +64,6 @@ class ProtoArray {
    *
    * @param blockSlot
    * @param blockRoot
-   * @param optionalParentRoot
    * @param stateRoot
    * @param justifiedEpoch
    * @param finalizedEpoch
@@ -71,7 +71,7 @@ class ProtoArray {
   public void onBlock(
       UnsignedLong blockSlot,
       Bytes32 blockRoot,
-      Optional<Bytes32> optionalParentRoot,
+      Bytes32 parentRoot,
       Bytes32 stateRoot,
       UnsignedLong justifiedEpoch,
       UnsignedLong finalizedEpoch) {
@@ -86,7 +86,8 @@ class ProtoArray {
             blockSlot,
             stateRoot,
             blockRoot,
-            optionalParentRoot.map(indices::get),
+            parentRoot,
+            Optional.ofNullable(indices.get(parentRoot)),
             justifiedEpoch,
             finalizedEpoch,
             UnsignedLong.ZERO,
@@ -389,5 +390,13 @@ class ProtoArray {
             || justifiedEpoch.equals(UnsignedLong.ZERO))
         && (node.getFinalizedEpoch().equals(finalizedEpoch)
             || finalizedEpoch.equals(UnsignedLong.ZERO));
+  }
+
+  public UnsignedLong getJustifiedEpoch() {
+    return justifiedEpoch;
+  }
+
+  public UnsignedLong getFinalizedEpoch() {
+    return finalizedEpoch;
   }
 }

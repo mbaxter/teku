@@ -15,14 +15,16 @@ package tech.pegasys.teku.cli.options;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.tuweni.bytes.Bytes32;
 import picocli.CommandLine.Option;
+import tech.pegasys.teku.util.cli.GraffitiConverter;
 
 public class ValidatorOptions {
 
   @Option(
-      names = {"--validators-key-file"},
+      names = {"--validators-unencrypted-key-file"},
       paramLabel = "<FILENAME>",
-      description = "The file to load validator keys from",
+      description = "The file to load unencrypted validator keys from",
       arity = "1")
   private String validatorKeyFile = null;
 
@@ -60,9 +62,18 @@ public class ValidatorOptions {
   @Option(
       names = {"--validators-external-signer-timeout"},
       paramLabel = "<INTEGER>",
-      description = "Timeout for the external signing service",
+      description = "Timeout (in milliseconds) for the external signing service",
       arity = "1")
   private int validatorExternalSignerTimeout = 1000;
+
+  @Option(
+      names = {"--validators-graffiti"},
+      converter = GraffitiConverter.class,
+      paramLabel = "<GRAFFITI STRING>",
+      description =
+          "Graffiti to include during block creation (gets converted to bytes and padded to Bytes32).",
+      arity = "1")
+  private Bytes32 graffiti;
 
   public String getValidatorKeyFile() {
     return validatorKeyFile;
@@ -86,5 +97,9 @@ public class ValidatorOptions {
 
   public int getValidatorExternalSignerTimeout() {
     return validatorExternalSignerTimeout;
+  }
+
+  public Bytes32 getGraffiti() {
+    return graffiti;
   }
 }

@@ -45,6 +45,8 @@ import tech.pegasys.teku.cli.subcommand.DepositCommand;
 import tech.pegasys.teku.cli.subcommand.GenesisCommand;
 import tech.pegasys.teku.cli.subcommand.PeerCommand;
 import tech.pegasys.teku.cli.subcommand.TransitionCommand;
+import tech.pegasys.teku.cli.subcommand.UnstableOptionsCommand;
+import tech.pegasys.teku.cli.subcommand.debug.DebugCommand;
 import tech.pegasys.teku.cli.util.CascadingDefaultProvider;
 import tech.pegasys.teku.cli.util.EnvironmentVariableDefaultProvider;
 import tech.pegasys.teku.cli.util.YamlConfigFileDefaultProvider;
@@ -52,7 +54,7 @@ import tech.pegasys.teku.logging.LoggingConfigurator;
 import tech.pegasys.teku.metrics.TekuMetricCategory;
 import tech.pegasys.teku.storage.server.DatabaseStorageException;
 import tech.pegasys.teku.util.cli.LogTypeConverter;
-import tech.pegasys.teku.util.cli.VersionProvider;
+import tech.pegasys.teku.util.cli.PicoCliVersionProvider;
 import tech.pegasys.teku.util.config.Eth1Address;
 import tech.pegasys.teku.util.config.InvalidConfigurationException;
 import tech.pegasys.teku.util.config.NetworkDefinition;
@@ -66,13 +68,15 @@ import tech.pegasys.teku.util.config.TekuConfiguration;
       TransitionCommand.class,
       PeerCommand.class,
       DepositCommand.class,
-      GenesisCommand.class
+      GenesisCommand.class,
+      DebugCommand.class,
+      UnstableOptionsCommand.class
     },
     showDefaultValues = true,
     abbreviateSynopsis = true,
     description = "Run the Teku beacon chain client and validator",
     mixinStandardHelpOptions = true,
-    versionProvider = VersionProvider.class,
+    versionProvider = PicoCliVersionProvider.class,
     synopsisHeading = "%n",
     descriptionHeading = "%nDescription:%n%n",
     optionListHeading = "%nOptions:%n",
@@ -116,31 +120,35 @@ public class BeaconNodeCommand implements Callable<Integer> {
       arity = "1")
   private File configFile;
 
-  @Option(
-      names = {"--Xstartup-target-peer-count"},
-      paramLabel = "<NUMBER>",
-      description = "Number of peers to wait for before considering the node in sync.",
-      hidden = true)
-  private Integer startupTargetPeerCount;
+  @Mixin(name = "Network")
+  private NetworkOptions networkOptions;
 
-  @Option(
-      names = {"--Xstartup-timeout-seconds"},
-      paramLabel = "<NUMBER>",
-      description =
-          "Timeout in seconds to allow the node to be in sync even if startup target peer count has not yet been reached.",
-      hidden = true)
-  private Integer startupTimeoutSeconds;
+  @Mixin(name = "P2P")
+  private P2POptions p2POptions;
 
-  @Mixin private NetworkOptions networkOptions;
-  @Mixin private P2POptions p2POptions;
-  @Mixin private InteropOptions interopOptions;
-  @Mixin private ValidatorOptions validatorOptions;
-  @Mixin private DepositOptions depositOptions;
-  @Mixin private LoggingOptions loggingOptions;
-  @Mixin private OutputOptions outputOptions;
-  @Mixin private MetricsOptions metricsOptions;
-  @Mixin private DataOptions dataOptions;
-  @Mixin private BeaconRestApiOptions beaconRestApiOptions;
+  @Mixin(name = "Interop")
+  private InteropOptions interopOptions;
+
+  @Mixin(name = "Validator")
+  private ValidatorOptions validatorOptions;
+
+  @Mixin(name = "Deposit")
+  private DepositOptions depositOptions;
+
+  @Mixin(name = "Logging")
+  private LoggingOptions loggingOptions;
+
+  @Mixin(name = "Output")
+  private OutputOptions outputOptions;
+
+  @Mixin(name = "Metrics")
+  private MetricsOptions metricsOptions;
+
+  @Mixin(name = "Data")
+  private DataOptions dataOptions;
+
+  @Mixin(name = "REST API")
+  private BeaconRestApiOptions beaconRestApiOptions;
 
   public BeaconNodeCommand(
       final PrintWriter outputWriter,
@@ -226,11 +234,15 @@ public class BeaconNodeCommand implements Callable<Integer> {
     errorWriter.println(ex.getMessage());
 
     CommandLine.UnmatchedArgumentException.printSuggestions(ex, outputWriter);
+    printUsage(outputWriter);
+
+    return ex.getCommandLine().getCommandSpec().exitCodeOnInvalidInput();
+  }
+
+  private void printUsage(PrintWriter outputWriter) {
     outputWriter.println();
     outputWriter.println("To display full help:");
     outputWriter.println("teku [COMMAND] --help");
-
-    return ex.getCommandLine().getCommandSpec().exitCodeOnInvalidInput();
   }
 
   @Override
@@ -258,12 +270,14 @@ public class BeaconNodeCommand implements Callable<Integer> {
   private void reportUnexpectedError(final Throwable t) {
     System.err.println("Teku failed to start.");
     t.printStackTrace();
-    System.exit(1);
+
+    errorWriter.println("Teku failed to start");
+    printUsage(errorWriter);
   }
 
   private void reportUserError(final Throwable ex) {
-    System.err.println(ex.getMessage());
-    System.exit(1);
+    errorWriter.println(ex.getMessage());
+    printUsage(errorWriter);
   }
 
   private void setLogLevels() {
@@ -281,8 +295,8 @@ public class BeaconNodeCommand implements Callable<Integer> {
     // TODO: validate option dependencies
     return TekuConfiguration.builder()
         .setNetwork(NetworkDefinition.fromCliArg(networkOptions.getNetwork()))
-        .setStartupTargetPeerCount(startupTargetPeerCount)
-        .setStartupTimeoutSeconds(startupTimeoutSeconds)
+        .setStartupTargetPeerCount(networkOptions.getStartupTargetPeerCount())
+        .setStartupTimeoutSeconds(networkOptions.getStartupTimeoutSeconds())
         .setP2pEnabled(p2POptions.isP2pEnabled())
         .setP2pInterface(p2POptions.getP2pInterface())
         .setP2pPort(p2POptions.getP2pPort())
@@ -308,11 +322,13 @@ public class BeaconNodeCommand implements Callable<Integer> {
             validatorOptions.getValidatorExternalSignerPublicKeys())
         .setValidatorExternalSignerUrl(validatorOptions.getValidatorExternalSignerUrl())
         .setValidatorExternalSignerTimeout(validatorOptions.getValidatorExternalSignerTimeout())
-        .setEth1Enabled(depositOptions.isEth1Enabled())
+        .setGraffiti(validatorOptions.getGraffiti())
         .setEth1DepositContractAddress(depositOptions.getEth1DepositContractAddress())
         .setEth1Endpoint(depositOptions.getEth1Endpoint())
+        .setEth1DepositsFromStorageEnabled(depositOptions.isEth1DepositsFromStorageEnabled())
         .setLogColorEnabled(loggingOptions.isLogColorEnabled())
         .setLogIncludeEventsEnabled(loggingOptions.isLogIncludeEventsEnabled())
+        .setLogIncludeValidatorDutiesEnabled(loggingOptions.isLogIncludeValidatorDutiesEnabled())
         .setLogDestination(loggingOptions.getLogDestination())
         .setLogFile(loggingOptions.getLogFile())
         .setLogFileNamePattern(loggingOptions.getLogFileNamePattern())
@@ -325,13 +341,16 @@ public class BeaconNodeCommand implements Callable<Integer> {
         .setMetricsPort(metricsOptions.getMetricsPort())
         .setMetricsInterface(metricsOptions.getMetricsInterface())
         .setMetricsCategories(metricsOptions.getMetricsCategories())
-        .setMetricsHostWhitelist(metricsOptions.getMetricsHostWhitelist())
+        .setMetricsHostAllowlist(metricsOptions.getMetricsHostAllowlist())
         .setDataPath(dataOptions.getDataPath())
         .setDataStorageMode(dataOptions.getDataStorageMode())
+        .setDataStorageFrequency(dataOptions.getDataStorageFrequency())
+        .setDataStorageCreateDbVersion(dataOptions.getCreateDbVersion())
         .setRestApiPort(beaconRestApiOptions.getRestApiPort())
         .setRestApiDocsEnabled(beaconRestApiOptions.isRestApiDocsEnabled())
         .setRestApiEnabled(beaconRestApiOptions.isRestApiEnabled())
         .setRestApiInterface(beaconRestApiOptions.getRestApiInterface())
+        .setRestApiHostAllowlist(beaconRestApiOptions.getRestApiHostAllowlist())
         .build();
   }
 }

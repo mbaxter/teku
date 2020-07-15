@@ -14,9 +14,13 @@
 package tech.pegasys.teku.logging;
 
 import static tech.pegasys.teku.logging.ColorConsolePrinter.print;
+import static tech.pegasys.teku.logging.LogFormatter.formatHashRoot;
 import static tech.pegasys.teku.logging.LoggingConfigurator.EVENT_LOGGER_NAME;
 
 import com.google.common.primitives.UnsignedLong;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -32,11 +36,20 @@ public class EventLogger {
     this.log = LogManager.getLogger(name);
   }
 
-  public void genesisEvent(final Bytes32 hashTreeRoot, final Bytes32 genesisBlockRoot) {
+  public void genesisEvent(
+      final Bytes32 hashTreeRoot, final Bytes32 genesisBlockRoot, final UnsignedLong genesisTime) {
+    final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    final String formattedGenesisTime =
+        Instant.ofEpochSecond(genesisTime.longValue()).atZone(ZoneId.of("GMT")).format(formatter);
+
     final String genesisEventLog =
         String.format(
-            "Genesis Event *** Initial state root: %s, Genesis block root: %s",
-            hashTreeRoot.toHexString(), genesisBlockRoot.toHexString());
+            "Genesis Event *** \n"
+                + "Genesis state root: %s \n"
+                + "Genesis block root: %s \n"
+                + "Genesis time: %s GMT",
+            hashTreeRoot.toHexString(), genesisBlockRoot.toHexString(), formattedGenesisTime);
     info(genesisEventLog, Color.CYAN);
   }
 
@@ -51,15 +64,23 @@ public class EventLogger {
             currentEpoch.toString(),
             justifiedCheckpoint.toString(),
             finalizedCheckpoint.toString(),
-            shortenHash(finalizedRoot.toHexString()));
-    info(epochEventLog, Color.YELLOW);
+            formatHashRoot(finalizedRoot));
+    info(epochEventLog, Color.GREEN);
+  }
+
+  public void nodeSlotsMissed(final UnsignedLong oldSlot, final UnsignedLong newSlot) {
+    final String driftEventLog =
+        String.format(
+            "Miss slots  *** Current slot: %s, previous slot: %s",
+            newSlot.toString(), oldSlot.toString());
+    info(driftEventLog, Color.WHITE);
   }
 
   public void syncEvent(
       final UnsignedLong nodeSlot, final UnsignedLong headSlot, final int numPeers) {
     final String syncEventLog =
         String.format(
-            "Sync Event *** Current slot: %s, Head slot: %s, Connected peers: %d",
+            "Sync Event  *** Current slot: %s, Head slot: %s, Connected peers: %d",
             nodeSlot, headSlot.toString(), numPeers);
     info(syncEventLog, Color.WHITE);
   }
@@ -74,43 +95,21 @@ public class EventLogger {
       final int numPeers) {
     String blockRoot = "   ... empty";
     if (nodeSlot.equals(headSlot)) {
-      blockRoot = shortenHash(bestBlockRoot.toHexString());
+      blockRoot = formatHashRoot(bestBlockRoot);
     }
     final String slotEventLog =
         String.format(
-            "Slot Event *** Slot: %s, Block: %s, Epoch: %s, Finalized checkpoint: %s, Finalized root: %s, Peers: %d",
+            "Slot Event  *** Slot: %s, Block: %s, Epoch: %s, Finalized checkpoint: %s, Finalized root: %s, Peers: %d",
             nodeSlot.toString(),
             blockRoot,
             nodeEpoch.toString(),
             finalizedCheckpoint.toString(),
-            shortenHash(finalizedRoot.toHexString()),
+            formatHashRoot(finalizedRoot),
             numPeers);
     info(slotEventLog, Color.WHITE);
   }
 
-  public void unprocessedAttestation(final Bytes32 beaconBlockRoot) {
-    debug("New Attestation with block root:  " + beaconBlockRoot + " detected.", Color.GREEN);
-  }
-
-  public void aggregateAndProof(final Bytes32 beaconBlockRoot) {
-    debug("New AggregateAndProof with block root:  " + beaconBlockRoot + " detected.", Color.BLUE);
-  }
-
-  public void unprocessedBlock(final Bytes32 stateRoot) {
-    debug(
-        "New BeaconBlock with state root:  " + stateRoot.toHexString() + " detected.", Color.GREEN);
-  }
-
-  private void debug(final String message, final Color color) {
-    log.debug(print(message, color));
-  }
-
   private void info(final String message, final Color color) {
     log.info(print(message, color));
-  }
-
-  private String shortenHash(final String hash) {
-    return String.format(
-        "%s..%s", hash.substring(0, 6), hash.substring(hash.length() - 4, hash.length()));
   }
 }

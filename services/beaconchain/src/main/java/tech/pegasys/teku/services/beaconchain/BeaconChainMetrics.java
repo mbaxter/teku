@@ -14,27 +14,47 @@
 package tech.pegasys.teku.services.beaconchain;
 
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_epoch_at_slot;
+import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.get_current_epoch;
+import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.get_previous_epoch;
+import static tech.pegasys.teku.datastructures.util.ValidatorsUtil.get_active_validator_indices;
 
+import com.google.common.primitives.UnsignedLong;
 import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.datastructures.blocks.NodeSlot;
+import tech.pegasys.teku.datastructures.state.BeaconState;
+import tech.pegasys.teku.datastructures.state.PendingAttestation;
+import tech.pegasys.teku.metrics.SettableGauge;
 import tech.pegasys.teku.metrics.TekuMetricCategory;
+import tech.pegasys.teku.networking.eth2.Eth2Network;
+import tech.pegasys.teku.ssz.SSZTypes.Bitlist;
+import tech.pegasys.teku.ssz.SSZTypes.SSZList;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.util.time.channels.SlotEventsChannel;
 
-public class BeaconChainMetrics {
+public class BeaconChainMetrics implements SlotEventsChannel {
   private static final long NOT_SET = 0L;
   private final RecentChainData recentChainData;
-  private volatile NodeSlot nodeSlot;
+  private final NodeSlot nodeSlot;
 
-  public BeaconChainMetrics(final RecentChainData recentChainData, NodeSlot nodeSlot) {
+  private final SettableGauge previousLiveValidators;
+  private final SettableGauge currentActiveValidators;
+  private final SettableGauge previousActiveValidators;
+  private final SettableGauge currentLiveValidators;
+
+  public BeaconChainMetrics(
+      final RecentChainData recentChainData,
+      final NodeSlot nodeSlot,
+      final MetricsSystem metricsSystem,
+      final Eth2Network p2pNetwork) {
     this.recentChainData = recentChainData;
     this.nodeSlot = nodeSlot;
-  }
 
-  public void initialize(final MetricsSystem metricsSystem) {
     metricsSystem.createGauge(
         TekuMetricCategory.BEACON,
         "epoch",
@@ -88,24 +108,86 @@ public class BeaconChainMetrics {
         "previous_justified_root",
         "Current previously justified root",
         this::getPreviousJustifiedRootValue);
+    metricsSystem.createGauge(
+        TekuMetricCategory.BEACON,
+        "peer_count",
+        "Tracks number of connected peers, verified to be on the same chain",
+        p2pNetwork::getPeerCount);
+
+    previousLiveValidators =
+        SettableGauge.create(
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "previous_live_validators",
+            "Number of active validators that successfully included attestation on chain for previous epoch");
+    currentLiveValidators =
+        SettableGauge.create(
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "current_live_validators",
+            "Number of active validators that successfully included attestation on chain for current epoch");
+    currentActiveValidators =
+        SettableGauge.create(
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "current_active_validators",
+            "Number of active validators in the current epoch");
+    previousActiveValidators =
+        SettableGauge.create(
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "previous_active_validators",
+            "Number of active validators in the previous epoch");
+  }
+
+  @Override
+  public void onSlot(final UnsignedLong slot) {
+    recentChainData.getBestState().ifPresent(this::updateMetrics);
+  }
+
+  private void updateMetrics(final BeaconState state) {
+    currentLiveValidators.set(getLiveValidators(state.getCurrent_epoch_attestations()));
+    currentActiveValidators.set(
+        get_active_validator_indices(state, get_current_epoch(state)).size());
+    previousLiveValidators.set(getLiveValidators(state.getPrevious_epoch_attestations()));
+    previousActiveValidators.set(
+        get_active_validator_indices(state, get_previous_epoch(state)).size());
+  }
+
+  private int getLiveValidators(final SSZList<PendingAttestation> attestations) {
+    final Map<UnsignedLong, Map<UnsignedLong, Bitlist>> aggregationBitsBySlotAndCommittee =
+        new HashMap<>();
+    attestations.forEach(
+        attestation ->
+            aggregationBitsBySlotAndCommittee
+                .computeIfAbsent(attestation.getData().getSlot(), __ -> new HashMap<>())
+                .computeIfAbsent(
+                    attestation.getData().getIndex(),
+                    __ -> attestation.getAggregation_bits().copy())
+                .setAllBits(attestation.getAggregation_bits()));
+
+    return aggregationBitsBySlotAndCommittee.values().stream()
+        .flatMap(aggregationBitsByCommittee -> aggregationBitsByCommittee.values().stream())
+        .mapToInt(Bitlist::getBitCount)
+        .sum();
   }
 
   static long getLongFromRoot(Bytes32 root) {
     return root.getLong(24, ByteOrder.LITTLE_ENDIAN);
   }
 
-  long getCurrentSlotValue() {
+  private long getCurrentSlotValue() {
     return nodeSlot.longValue();
   }
 
-  long getHeadSlotValue() {
+  private long getHeadSlotValue() {
     if (recentChainData.isPreGenesis()) {
       return NOT_SET;
     }
     return recentChainData.getBestSlot().longValue();
   }
 
-  long getFinalizedRootValue() {
+  private long getFinalizedRootValue() {
     Optional<BeaconBlockAndState> maybeBlockAndState = recentChainData.getBestBlockAndState();
     if (maybeBlockAndState.isPresent()) {
       Bytes32 root = maybeBlockAndState.get().getState().getFinalized_checkpoint().getRoot();
@@ -114,7 +196,7 @@ public class BeaconChainMetrics {
     return 0L;
   }
 
-  long getPreviousJustifiedRootValue() {
+  private long getPreviousJustifiedRootValue() {
     Optional<BeaconBlockAndState> maybeBlockAndState = recentChainData.getBestBlockAndState();
     if (maybeBlockAndState.isPresent()) {
       Bytes32 root =
@@ -124,7 +206,7 @@ public class BeaconChainMetrics {
     return 0L;
   }
 
-  long getJustifiedRootValue() {
+  private long getJustifiedRootValue() {
     Optional<BeaconBlockAndState> maybeBlockAndState = recentChainData.getBestBlockAndState();
     if (maybeBlockAndState.isPresent()) {
       Bytes32 root =
@@ -134,7 +216,7 @@ public class BeaconChainMetrics {
     return 0L;
   }
 
-  long getHeadRootValue() {
+  private long getHeadRootValue() {
     if (recentChainData.isPreGenesis()) {
       return NOT_SET;
     }
@@ -142,21 +224,21 @@ public class BeaconChainMetrics {
     return maybeBlockRoot.map(BeaconChainMetrics::getLongFromRoot).orElse(0L);
   }
 
-  long getFinalizedEpochValue() {
+  private long getFinalizedEpochValue() {
     if (recentChainData.isPreGenesis()) {
       return NOT_SET;
     }
     return recentChainData.getFinalizedEpoch().longValue();
   }
 
-  long getJustifiedEpochValue() {
+  private long getJustifiedEpochValue() {
     if (recentChainData.isPreGenesis()) {
       return NOT_SET;
     }
     return recentChainData.getBestJustifiedEpoch().longValue();
   }
 
-  long getPreviousJustifiedEpochValue() {
+  private long getPreviousJustifiedEpochValue() {
     Optional<BeaconBlockAndState> maybeBlockAndState = recentChainData.getBestBlockAndState();
     return maybeBlockAndState
         .map(
@@ -169,7 +251,7 @@ public class BeaconChainMetrics {
         .orElse(0L);
   }
 
-  long getCurrentEpochValue() {
+  private long getCurrentEpochValue() {
     return compute_epoch_at_slot(nodeSlot.getValue()).longValue();
   }
 }

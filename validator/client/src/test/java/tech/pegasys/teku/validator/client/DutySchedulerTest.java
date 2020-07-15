@@ -42,6 +42,7 @@ import tech.pegasys.teku.core.signatures.Signer;
 import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
+import tech.pegasys.teku.metrics.StubMetricsSystem;
 import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.async.StubAsyncRunner;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
@@ -61,8 +62,10 @@ class DutySchedulerTest {
       Set.of(VALIDATOR1_KEY, VALIDATOR2_KEY);
   private final Signer validator1Signer = mock(Signer.class);
   private final Signer validator2Signer = mock(Signer.class);
-  private final Validator validator1 = new Validator(VALIDATOR1_KEY, validator1Signer);
-  private final Validator validator2 = new Validator(VALIDATOR2_KEY, validator2Signer);
+  private final Validator validator1 =
+      new Validator(VALIDATOR1_KEY, validator1Signer, Optional.empty());
+  private final Validator validator2 =
+      new Validator(VALIDATOR2_KEY, validator2Signer, Optional.empty());
 
   private final ValidatorApiChannel validatorApiChannel = mock(ValidatorApiChannel.class);
   private final ValidatorDutyFactory dutyFactory = mock(ValidatorDutyFactory.class);
@@ -72,12 +75,15 @@ class DutySchedulerTest {
 
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil();
   private final ForkInfo fork = dataStructureUtil.randomForkInfo();
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
   private final DutyScheduler dutyScheduler =
       new DutyScheduler(
+          metricsSystem,
           new RetryingDutyLoader(
               asyncRunner,
               new ValidatorApiDutyLoader(
+                  metricsSystem,
                   validatorApiChannel,
                   forkProvider,
                   () -> new ScheduledDuties(dutyFactory),
@@ -189,6 +195,27 @@ class DutySchedulerTest {
   }
 
   @Test
+  public void shouldRefetchDutiesAfterBlockImportedFromTwoOrMoreEpochsBefore() {
+    when(validatorApiChannel.getDuties(any(), any())).thenReturn(new SafeFuture<>());
+    dutyScheduler.onSlot(compute_start_slot_at_epoch(UnsignedLong.valueOf(5)));
+
+    verify(validatorApiChannel).getDuties(UnsignedLong.valueOf(5), VALIDATOR_KEYS);
+    verify(validatorApiChannel).getDuties(UnsignedLong.valueOf(6), VALIDATOR_KEYS);
+    verifyNoMoreInteractions(validatorApiChannel);
+
+    dutyScheduler.onBlockImportedForSlot(compute_start_slot_at_epoch(UnsignedLong.valueOf(4)));
+
+    // Duties are invalidated but not yet re-requested as we might be importing a batch of blocks
+    verifyNoMoreInteractions(validatorApiChannel);
+
+    dutyScheduler.onSlot(compute_start_slot_at_epoch(UnsignedLong.valueOf(5)).plus(ONE));
+    // Re-requests epoch 6 which may have been changed by the new block
+    verify(validatorApiChannel, times(2)).getDuties(UnsignedLong.valueOf(6), VALIDATOR_KEYS);
+    // Epoch 5 is unchanged so not re-requested
+    verifyNoMoreInteractions(validatorApiChannel);
+  }
+
+  @Test
   public void shouldScheduleBlockProposalDuty() {
     final UnsignedLong blockProposerSlot = UnsignedLong.valueOf(5);
     final ValidatorDuties validator1Duties =
@@ -213,11 +240,14 @@ class DutySchedulerTest {
   @Test
   public void shouldDelayExecutingDutiesUntilSchedulingIsComplete() {
     final ScheduledDuties scheduledDuties = mock(ScheduledDuties.class);
+    final StubMetricsSystem metricsSystem = new StubMetricsSystem();
     final ValidatorTimingChannel dutyScheduler =
         new DutyScheduler(
+            metricsSystem,
             new RetryingDutyLoader(
                 asyncRunner,
                 new ValidatorApiDutyLoader(
+                    metricsSystem,
                     validatorApiChannel,
                     forkProvider,
                     () -> scheduledDuties,
@@ -310,9 +340,11 @@ class DutySchedulerTest {
 
     // Both validators should be scheduled to create an attestation in the same slot
     verify(attestationDuty)
-        .addValidator(validator1, validator1Committee, validator1CommitteePosition);
+        .addValidator(
+            validator1, validator1Committee, validator1CommitteePosition, validator1Index);
     verify(attestationDuty)
-        .addValidator(validator2, validator2Committee, validator2CommitteePosition);
+        .addValidator(
+            validator2, validator2Committee, validator2CommitteePosition, validator2Index);
 
     // Execute
     dutyScheduler.onAttestationCreationDue(attestationSlot);
@@ -361,7 +393,8 @@ class DutySchedulerTest {
     when(dutyFactory.createAttestationProductionDuty(attestationSlot)).thenReturn(attestationDuty);
     when(dutyFactory.createAggregationDuty(attestationSlot)).thenReturn(aggregationDuty);
     when(aggregationDuty.performDuty()).thenReturn(new SafeFuture<>());
-    when(attestationDuty.addValidator(validator1, validator1Committee, validator1CommitteePosition))
+    when(attestationDuty.addValidator(
+            validator1, validator1Committee, validator1CommitteePosition, validator1Index))
         .thenReturn(unsignedAttestationFuture);
 
     // Load duties

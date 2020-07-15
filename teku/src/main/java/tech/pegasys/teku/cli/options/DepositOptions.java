@@ -21,24 +21,27 @@ public class DepositOptions {
   @Option(
       names = {"--eth1-deposit-contract-address"},
       paramLabel = "<ADDRESS>",
-      description = "Contract address for the deposit contract",
+      description = "Contract address for the deposit contract. Required if eth1-endpoint is set.",
       arity = "1")
   private Eth1Address eth1DepositContractAddress = null; // Depends on network configuration
 
   @Option(
       names = {"--eth1-endpoint"},
       paramLabel = "<NETWORK>",
-      description = "URL for Eth 1.0 node",
+      description = "URL for Eth1 node.",
       arity = "1")
   private String eth1Endpoint = null;
 
   @Option(
-      names = {"--eth1-enabled"},
+      hidden = true,
+      names = {"--Xeth1-deposits-from-storage-enabled"},
+      defaultValue = "true",
       paramLabel = "<BOOLEAN>",
-      description = "Whether to connect to the ETH1 chain",
       fallbackValue = "true",
+      description =
+          "On startup, use Eth1 deposits from storage before loading from the remote endpoint.",
       arity = "0..1")
-  private boolean eth1Enabled = true;
+  private boolean eth1DepositsFromStorageEnabled = true;
 
   public Eth1Address getEth1DepositContractAddress() {
     return eth1DepositContractAddress;
@@ -48,7 +51,7 @@ public class DepositOptions {
     return eth1Endpoint;
   }
 
-  public boolean isEth1Enabled() {
-    return eth1Enabled;
+  public boolean isEth1DepositsFromStorageEnabled() {
+    return eth1DepositsFromStorageEnabled;
   }
 }

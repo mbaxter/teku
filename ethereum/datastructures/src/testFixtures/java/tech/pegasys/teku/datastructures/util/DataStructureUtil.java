@@ -23,6 +23,7 @@ import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 import com.google.common.primitives.UnsignedLong;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.List;
 import java.util.Random;
 import java.util.function.Supplier;
 import java.util.stream.LongStream;
@@ -61,6 +62,8 @@ import tech.pegasys.teku.datastructures.state.Fork;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.state.PendingAttestation;
 import tech.pegasys.teku.datastructures.state.Validator;
+import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
+import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.ssz.SSZTypes.Bitlist;
 import tech.pegasys.teku.ssz.SSZTypes.Bitvector;
 import tech.pegasys.teku.ssz.SSZTypes.Bytes4;
@@ -210,7 +213,47 @@ public final class DataStructureUtil {
   }
 
   public AttesterSlashing randomAttesterSlashing() {
-    return new AttesterSlashing(randomIndexedAttestation(), randomIndexedAttestation());
+    IndexedAttestation attestation1 = randomIndexedAttestation();
+    IndexedAttestation attestation2 =
+        new IndexedAttestation(
+            attestation1.getAttesting_indices(), randomAttestationData(), randomSignature());
+    return new AttesterSlashing(attestation1, attestation2);
+  }
+
+  public List<SignedBeaconBlock> randomSignedBeaconBlockSequence(
+      final SignedBeaconBlock parent, final int count) {
+    return randomSignedBeaconBlockSequence(parent, count, false);
+  }
+
+  public List<SignedBeaconBlock> randomSignedBeaconBlockSequence(
+      final SignedBeaconBlock parent, final int count, final boolean full) {
+    final List<SignedBeaconBlock> blocks = new ArrayList<>();
+    SignedBeaconBlock parentBlock = parent;
+    for (int i = 0; i < count; i++) {
+      final long nextSlot = parentBlock.getSlot().plus(UnsignedLong.ONE).longValue();
+      final Bytes32 parentRoot = parentBlock.getRoot();
+      final SignedBeaconBlock block = randomSignedBeaconBlock(nextSlot, parentRoot, full);
+      blocks.add(block);
+      parentBlock = block;
+    }
+    return blocks;
+  }
+
+  public List<SignedBlockAndState> randomSignedBlockAndStateSequence(
+      final SignedBeaconBlock parent, final int count, final boolean full) {
+    final List<SignedBlockAndState> blocks = new ArrayList<>();
+    SignedBeaconBlock parentBlock = parent;
+    for (int i = 0; i < count; i++) {
+      final long nextSlot = parentBlock.getSlot().plus(UnsignedLong.ONE).longValue();
+      final Bytes32 parentRoot = parentBlock.getRoot();
+      final BeaconState state = randomBeaconState(UnsignedLong.valueOf(nextSlot));
+      final Bytes32 stateRoot = state.hash_tree_root();
+      final SignedBeaconBlock block =
+          signedBlock(randomBeaconBlock(nextSlot, parentRoot, stateRoot, full));
+      blocks.add(new SignedBlockAndState(block, state));
+      parentBlock = block;
+    }
+    return blocks;
   }
 
   public SignedBeaconBlock randomSignedBeaconBlock(long slotNum) {
@@ -223,8 +266,16 @@ public final class DataStructureUtil {
   }
 
   public SignedBeaconBlock randomSignedBeaconBlock(long slotNum, Bytes32 parentRoot) {
-    final BeaconBlock beaconBlock = randomBeaconBlock(slotNum, parentRoot);
+    return randomSignedBeaconBlock(slotNum, parentRoot, false);
+  }
+
+  public SignedBeaconBlock randomSignedBeaconBlock(long slotNum, Bytes32 parentRoot, boolean full) {
+    final BeaconBlock beaconBlock = randomBeaconBlock(slotNum, parentRoot, full);
     return new SignedBeaconBlock(beaconBlock, randomSignature());
+  }
+
+  public SignedBeaconBlock signedBlock(final BeaconBlock block) {
+    return new SignedBeaconBlock(block, randomSignature());
   }
 
   public SignedBeaconBlock randomSignedBeaconBlock(long slotNum, BeaconState state) {
@@ -283,13 +334,17 @@ public final class DataStructureUtil {
   }
 
   public BeaconBlock randomBeaconBlock(long slotNum, Bytes32 parentRoot, boolean isFull) {
+    return randomBeaconBlock(slotNum, parentRoot, randomBytes32(), isFull);
+  }
+
+  public BeaconBlock randomBeaconBlock(
+      long slotNum, Bytes32 parentRoot, final Bytes32 stateRoot, boolean isFull) {
     UnsignedLong slot = UnsignedLong.valueOf(slotNum);
 
     final UnsignedLong proposer_index = randomUnsignedLong();
-    Bytes32 state_root = randomBytes32();
     BeaconBlockBody body = !isFull ? randomBeaconBlockBody() : randomFullBeaconBlockBody();
 
-    return new BeaconBlock(slot, proposer_index, parentRoot, state_root, body);
+    return new BeaconBlock(slot, proposer_index, parentRoot, stateRoot, body);
   }
 
   public BeaconBlock randomBeaconBlock(long slotNum, Bytes32 parentRoot) {
@@ -374,10 +429,33 @@ public final class DataStructureUtil {
   }
 
   public DepositWithIndex randomDepositWithIndex() {
+    return randomDepositWithIndex(randomLong());
+  }
+
+  public DepositWithIndex randomDepositWithIndex(long depositIndex) {
     return new DepositWithIndex(
         SSZVector.createMutable(32, randomBytes32()),
         randomDepositData(),
-        randomUnsignedLong().mod(UnsignedLong.valueOf(Constants.DEPOSIT_CONTRACT_TREE_DEPTH)));
+        UnsignedLong.valueOf(depositIndex));
+  }
+
+  public DepositsFromBlockEvent randomDepositsFromBlockEvent(
+      final long blockIndex, long depositCount) {
+    return randomDepositsFromBlockEvent(UnsignedLong.valueOf(blockIndex), depositCount);
+  }
+
+  public DepositsFromBlockEvent randomDepositsFromBlockEvent(
+      UnsignedLong blockIndex, long depositCount) {
+    List<tech.pegasys.teku.pow.event.Deposit> deposits = new ArrayList<>();
+    for (long i = 0; i < depositCount; i++) {
+      deposits.add(randomDepositEvent(UnsignedLong.valueOf(i)));
+    }
+    return new DepositsFromBlockEvent(blockIndex, randomBytes32(), randomUnsignedLong(), deposits);
+  }
+
+  public MinGenesisTimeBlockEvent randomMinGenesisTimeBlockEvent(final long blockIndex) {
+    return new MinGenesisTimeBlockEvent(
+        randomUnsignedLong(), UnsignedLong.valueOf(blockIndex), randomBytes32());
   }
 
   public Deposit randomDepositWithoutIndex() {
@@ -399,6 +477,10 @@ public final class DataStructureUtil {
         randomSignature(),
         randomUnsignedLong(),
         index);
+  }
+
+  public tech.pegasys.teku.pow.event.Deposit randomDepositEvent() {
+    return randomDepositEvent(randomUnsignedLong());
   }
 
   public ArrayList<DepositWithIndex> randomDeposits(int num) {

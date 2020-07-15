@@ -78,10 +78,16 @@ public class SimpleBlockValidator implements BlockValidator {
         BlockProcessorUtil.verify_attestations(
             preState, blockBody.getAttestations(), signatureVerifier);
         BlockProcessorUtil.verify_randao(preState, blockMessage, signatureVerifier);
-        BlockProcessorUtil.verify_proposer_slashings(
-            preState, blockBody.getProposer_slashings(), signatureVerifier);
-        BlockProcessorUtil.verify_voluntary_exits(
-            preState, blockBody.getVoluntary_exits(), signatureVerifier);
+
+        if (!BlockProcessorUtil.verify_proposer_slashings(
+            preState, blockBody.getProposer_slashings(), signatureVerifier)) {
+          return SafeFuture.completedFuture(new BlockValidationResult(false));
+        }
+
+        if (!BlockProcessorUtil.verify_voluntary_exits(
+            preState, blockBody.getVoluntary_exits(), signatureVerifier)) {
+          return SafeFuture.completedFuture(new BlockValidationResult(false));
+        }
       }
       return SafeFuture.completedFuture(new BlockValidationResult(true));
     } catch (BlockProcessingException | InvalidSignatureException e) {

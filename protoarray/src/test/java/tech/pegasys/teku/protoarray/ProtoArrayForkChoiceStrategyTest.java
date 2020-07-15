@@ -14,7 +14,6 @@
 package tech.pegasys.teku.protoarray;
 
 import static com.google.common.primitives.UnsignedLong.ZERO;
-import static com.google.common.primitives.UnsignedLong.valueOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.protoarray.ProtoArrayForkChoiceStrategy.computeDeltas;
 import static tech.pegasys.teku.protoarray.ProtoArrayTestUtil.createStoreToManipulateVotes;
@@ -31,22 +30,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.datastructures.forkchoice.MutableStore;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
-import tech.pegasys.teku.storage.Store;
-import tech.pegasys.teku.storage.api.StubStorageUpdateChannel;
 
 public class ProtoArrayForkChoiceStrategyTest {
 
   private Map<Bytes32, Integer> indices;
   private List<UnsignedLong> oldBalances;
   private List<UnsignedLong> newBalances;
-  private Store.Transaction store;
+  private MutableStore store;
 
   @BeforeEach
   void setUp() {
     indices = new HashMap<>();
     oldBalances = new ArrayList<>();
     newBalances = new ArrayList<>();
-    store = createStoreToManipulateVotes().startTransaction(new StubStorageUpdateChannel());
+    store = createStoreToManipulateVotes();
   }
 
   @Test
@@ -55,7 +52,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
     for (int i = 0; i < validatorCount; i++) {
       indices.put(getHash(i), i);
-      store.getVote(valueOf(i));
+      store.getVote(UnsignedLong.valueOf(i));
       oldBalances.add(ZERO);
       newBalances.add(ZERO);
     }
@@ -69,12 +66,12 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void allVotedTheSame() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
     int validatorCount = 16;
 
     for (int i = 0; i < validatorCount; i++) {
       indices.put(getHash(i), i);
-      store.getVote(valueOf(i)).setNextRoot(getHash(0));
+      store.getVote(UnsignedLong.valueOf(i)).setNextRoot(getHash(0));
       oldBalances.add(BALANCE);
       newBalances.add(BALANCE);
     }
@@ -98,12 +95,12 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void differentVotes() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
     int validatorCount = 16;
 
     for (int i = 0; i < validatorCount; i++) {
       indices.put(getHash(i), i);
-      store.getVote(valueOf(i)).setNextRoot(getHash(i));
+      store.getVote(UnsignedLong.valueOf(i)).setNextRoot(getHash(i));
       oldBalances.add(BALANCE);
       newBalances.add(BALANCE);
     }
@@ -119,12 +116,12 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void movingVotes() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
     int validatorCount = 16;
 
     for (int i = 0; i < validatorCount; i++) {
       indices.put(getHash(i), i);
-      VoteTracker vote = store.getVote(valueOf(i));
+      VoteTracker vote = store.getVote(UnsignedLong.valueOf(i));
       vote.setCurrentRoot(getHash(0));
       vote.setNextRoot(getHash(1));
       oldBalances.add(BALANCE);
@@ -155,7 +152,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void moveOutOfTree() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
 
     // There is only one block.
     indices.put(getHash(1), 0);
@@ -165,12 +162,12 @@ public class ProtoArrayForkChoiceStrategyTest {
     newBalances = Collections.nCopies(2, BALANCE);
 
     // One validator moves their vote from the block to the zero hash.
-    VoteTracker validator1vote = store.getVote(valueOf(0));
+    VoteTracker validator1vote = store.getVote(UnsignedLong.valueOf(0));
     validator1vote.setCurrentRoot(getHash(1));
     validator1vote.setNextRoot(Bytes32.ZERO);
 
     // One validator moves their vote from the block to something outside the tree.
-    VoteTracker validator2vote = store.getVote(valueOf(1));
+    VoteTracker validator2vote = store.getVote(UnsignedLong.valueOf(1));
     validator2vote.setCurrentRoot(getHash(1));
     validator2vote.setNextRoot(getHash(1337));
 
@@ -186,14 +183,14 @@ public class ProtoArrayForkChoiceStrategyTest {
   @Test
   void changingBalances() {
 
-    final UnsignedLong OLD_BALANCE = valueOf(42);
-    final UnsignedLong NEW_BALANCE = OLD_BALANCE.times(valueOf(2));
+    final UnsignedLong OLD_BALANCE = UnsignedLong.valueOf(42);
+    final UnsignedLong NEW_BALANCE = OLD_BALANCE.times(UnsignedLong.valueOf(2));
 
     int validatorCount = 16;
 
     for (int i = 0; i < validatorCount; i++) {
       indices.put(getHash(i), i);
-      VoteTracker vote = store.getVote(valueOf(i));
+      VoteTracker vote = store.getVote(UnsignedLong.valueOf(i));
       vote.setCurrentRoot(getHash(0));
       vote.setNextRoot(getHash(1));
       oldBalances.add(OLD_BALANCE);
@@ -222,7 +219,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void validatorAppears() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
 
     // There are two blocks.
     indices.put(getHash(1), 0);
@@ -236,7 +233,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
     // Both validators move votes from block 1 to block 2.
     for (int i = 0; i < 2; i++) {
-      VoteTracker vote = store.getVote(valueOf(i));
+      VoteTracker vote = store.getVote(UnsignedLong.valueOf(i));
       vote.setCurrentRoot(getHash(1));
       vote.setNextRoot(getHash(2));
     }
@@ -255,7 +252,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
   @Test
   void validatorDisappears() {
-    final UnsignedLong BALANCE = valueOf(42);
+    final UnsignedLong BALANCE = UnsignedLong.valueOf(42);
 
     // There are two blocks.
     indices.put(getHash(1), 0);
@@ -269,7 +266,7 @@ public class ProtoArrayForkChoiceStrategyTest {
 
     // Both validators move votes from block 1 to block 2.
     for (int i = 0; i < 2; i++) {
-      VoteTracker vote = store.getVote(valueOf(i));
+      VoteTracker vote = store.getVote(UnsignedLong.valueOf(i));
       vote.setCurrentRoot(getHash(1));
       vote.setNextRoot(getHash(2));
     }

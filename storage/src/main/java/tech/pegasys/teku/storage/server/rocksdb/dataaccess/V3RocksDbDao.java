@@ -14,50 +14,33 @@
 package tech.pegasys.teku.storage.server.rocksdb.dataaccess;
 
 import com.google.common.primitives.UnsignedLong;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
+import com.google.errorprone.annotations.MustBeClosed;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.NavigableMap;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.core.StateTransition;
-import tech.pegasys.teku.core.StateTransitionException;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
-import tech.pegasys.teku.storage.server.DatabaseStorageException;
+import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
+import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
+import tech.pegasys.teku.protoarray.ProtoArraySnapshot;
+import tech.pegasys.teku.storage.api.schema.SlotAndBlockRoot;
 import tech.pegasys.teku.storage.server.rocksdb.core.ColumnEntry;
-import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbInstance;
-import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbInstance.Transaction;
+import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbAccessor;
+import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbAccessor.RocksDbTransaction;
 import tech.pegasys.teku.storage.server.rocksdb.schema.V3Schema;
 
-public class V3RocksDbDao implements RocksDbDao {
-  private static final Logger LOG = LogManager.getLogger();
+public class V3RocksDbDao
+    implements RocksDbHotDao, RocksDbFinalizedDao, RocksDbEth1Dao, RocksDbProtoArrayDao {
 
-  // Persistent data
-  private final RocksDbInstance db;
-  // In-memory data
-  private final NavigableMap<UnsignedLong, Set<Bytes32>> hotRootsBySlotCache =
-      new ConcurrentSkipListMap<>();
-  private final Map<Bytes32, BeaconState> hotStates = new ConcurrentHashMap<>();
+  private final RocksDbAccessor db;
 
-  public V3RocksDbDao(final RocksDbInstance db) {
+  public V3RocksDbDao(final RocksDbAccessor db) {
     this.db = db;
-    initialize();
   }
 
   @Override
@@ -81,18 +64,36 @@ public class V3RocksDbDao implements RocksDbDao {
   }
 
   @Override
-  public Optional<UnsignedLong> getHighestFinalizedSlot() {
-    return db.getLastEntry(V3Schema.FINALIZED_ROOTS_BY_SLOT).map(ColumnEntry::getKey);
+  public Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(final UnsignedLong slot) {
+    return db.get(V3Schema.FINALIZED_ROOTS_BY_SLOT, slot).flatMap(this::getFinalizedBlock);
   }
 
   @Override
-  public Optional<Bytes32> getFinalizedRootAtSlot(final UnsignedLong slot) {
-    return db.get(V3Schema.FINALIZED_ROOTS_BY_SLOT, slot);
+  public Optional<SignedBeaconBlock> getLatestFinalizedBlockAtSlot(final UnsignedLong slot) {
+    return db.getFloorEntry(V3Schema.FINALIZED_ROOTS_BY_SLOT, slot)
+        .map(ColumnEntry::getValue)
+        .flatMap(this::getFinalizedBlock);
   }
 
   @Override
-  public Optional<Bytes32> getLatestFinalizedRootAtSlot(final UnsignedLong slot) {
-    return db.getFloorEntry(V3Schema.FINALIZED_ROOTS_BY_SLOT, slot).map(ColumnEntry::getValue);
+  public Optional<BeaconState> getLatestAvailableFinalizedState(final UnsignedLong maxSlot) {
+    return db.getFloorEntry(V3Schema.FINALIZED_ROOTS_BY_SLOT, maxSlot)
+        .map(ColumnEntry::getValue)
+        .flatMap(root -> db.get(V3Schema.FINALIZED_STATES_BY_ROOT, root));
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<SignedBeaconBlock> streamFinalizedBlocks(
+      final UnsignedLong startSlot, final UnsignedLong endSlot) {
+    return db.stream(V3Schema.FINALIZED_ROOTS_BY_SLOT, startSlot, endSlot)
+        .map(ColumnEntry::getValue)
+        .flatMap(root -> getFinalizedBlock(root).stream());
+  }
+
+  @Override
+  public Optional<UnsignedLong> getSlotForFinalizedBlockRoot(final Bytes32 blockRoot) {
+    return getFinalizedBlock(blockRoot).map(SignedBeaconBlock::getSlot);
   }
 
   @Override
@@ -106,13 +107,8 @@ public class V3RocksDbDao implements RocksDbDao {
   }
 
   @Override
-  public Optional<BeaconState> getHotState(final Bytes32 root) {
-    return Optional.ofNullable(hotStates.get(root));
-  }
-
-  @Override
-  public Optional<BeaconState> getFinalizedState(final Bytes32 root) {
-    return db.get(V3Schema.FINALIZED_STATES_BY_ROOT, root);
+  public Optional<BeaconState> getLatestFinalizedState() {
+    return db.get(V3Schema.LATEST_FINALIZED_STATE);
   }
 
   @Override
@@ -121,18 +117,25 @@ public class V3RocksDbDao implements RocksDbDao {
   }
 
   @Override
-  public Map<Bytes32, BeaconState> getHotStates() {
-    return new HashMap<>(hotStates);
+  public List<Bytes32> getStateRootsBeforeSlot(final UnsignedLong slot) {
+    try (Stream<ColumnEntry<Bytes32, SlotAndBlockRoot>> stream =
+        db.stream(V3Schema.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT)) {
+      return stream
+          .filter((column) -> column.getValue().getSlot().compareTo(slot) < 0)
+          .map(ColumnEntry::getKey)
+          .collect(Collectors.toList());
+    }
   }
 
   @Override
-  public Map<Checkpoint, BeaconState> getCheckpointStates() {
-    return db.getAll(V3Schema.CHECKPOINT_STATES);
+  public Optional<SlotAndBlockRoot> getSlotAndBlockRootFromStateRoot(final Bytes32 stateRoot) {
+    return db.get(V3Schema.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT, stateRoot);
   }
 
   @Override
-  public Stream<ColumnEntry<Checkpoint, BeaconState>> streamCheckpointStates() {
-    return db.stream(V3Schema.CHECKPOINT_STATES);
+  @MustBeClosed
+  public Stream<SignedBeaconBlock> streamHotBlocks() {
+    return db.stream(V3Schema.HOT_BLOCKS_BY_ROOT).map(ColumnEntry::getValue);
   }
 
   @Override
@@ -140,129 +143,58 @@ public class V3RocksDbDao implements RocksDbDao {
     return db.getAll(V3Schema.VOTES);
   }
 
-  private Optional<BeaconState> getLatestFinalizedState() {
-    return db.get(V3Schema.LATEST_FINALIZED_STATE);
-  }
-
-  public Optional<Bytes32> getLatestFinalizedRoot() {
-    return db.getLastEntry(V3Schema.FINALIZED_ROOTS_BY_SLOT).map(ColumnEntry::getValue);
+  @Override
+  @MustBeClosed
+  public Stream<DepositsFromBlockEvent> streamDepositsFromBlocks() {
+    return db.stream(V3Schema.DEPOSITS_FROM_BLOCK_EVENTS).map(ColumnEntry::getValue);
   }
 
   @Override
-  public Updater updater() {
-    return new V3Updater(db, hotRootsBySlotCache, hotStates);
+  public Optional<MinGenesisTimeBlockEvent> getMinGenesisTimeBlock() {
+    return db.get(V3Schema.MIN_GENESIS_TIME_BLOCK);
+  }
+
+  @Override
+  public Optional<ProtoArraySnapshot> getProtoArraySnapshot() {
+    return db.get(V3Schema.PROTO_ARRAY_SNAPSHOT);
+  }
+
+  @Override
+  @MustBeClosed
+  public HotUpdater hotUpdater() {
+    return new V3Updater(db);
+  }
+
+  @Override
+  @MustBeClosed
+  public FinalizedUpdater finalizedUpdater() {
+    return new V3Updater(db);
+  }
+
+  @Override
+  @MustBeClosed
+  public Eth1Updater eth1Updater() {
+    return new V3Updater(db);
+  }
+
+  @Override
+  @MustBeClosed
+  public ProtoArrayUpdater protoArrayUpdater() {
+    return new V3Updater(db);
   }
 
   @Override
   public void close() throws Exception {
-    hotRootsBySlotCache.clear();
     db.close();
   }
 
-  private void initialize() {
-    final Optional<BeaconState> finalizedState = getLatestFinalizedState();
-    final Optional<Bytes32> finalizedRoot = getLatestFinalizedRoot();
-    final Map<Bytes32, SignedBeaconBlock> hotBlocksByRoot = getHotBlocks();
+  private static class V3Updater
+      implements HotUpdater, FinalizedUpdater, Eth1Updater, ProtoArrayUpdater {
 
-    if (finalizedRoot.isEmpty() && finalizedState.isEmpty() && hotBlocksByRoot.isEmpty()) {
-      // Database is empty, nothing to initialize
-      LOG.trace("Database appears to be empty.  Skip initialization of hot states.");
-      return;
-    } else if (finalizedRoot.isEmpty() || finalizedState.isEmpty()) {
-      throw new DatabaseStorageException("Missing latest finalized block information");
-    }
+    private final RocksDbTransaction transaction;
 
-    LOG.info("Initializing hot states from hot blocks");
-    initializeHotStates(finalizedRoot.get(), finalizedState.get(), hotBlocksByRoot);
-    LOG.info("Finished initializing hot states from hot blocks");
-  }
-
-  private void initializeHotStates(
-      final Bytes32 finalizedRoot,
-      final BeaconState finalizedState,
-      final Map<Bytes32, SignedBeaconBlock> hotBlocksByRoot) {
-    // Initialize hot states with latest finalized state
-    hotStates.put(finalizedRoot, finalizedState);
-
-    // Index blocks by parent root
-    final Map<Bytes32, List<SignedBeaconBlock>> blocksByParent = new HashMap<>();
-    for (Entry<Bytes32, SignedBeaconBlock> hotBlockEntry : hotBlocksByRoot.entrySet()) {
-      final SignedBeaconBlock currentBlock = hotBlockEntry.getValue();
-      final List<SignedBeaconBlock> blockList =
-          blocksByParent.computeIfAbsent(currentBlock.getParent_root(), (key) -> new ArrayList<>());
-      blockList.add(currentBlock);
-    }
-
-    // Generate remaining hot states
-    final Deque<Bytes32> parentRoots = new ArrayDeque<>();
-    parentRoots.push(finalizedRoot);
-    while (!parentRoots.isEmpty()) {
-      final Bytes32 parentRoot = parentRoots.pop();
-      final BeaconState parentState = hotStates.get(parentRoot);
-      final List<SignedBeaconBlock> blocks =
-          blocksByParent.computeIfAbsent(parentRoot, (key) -> Collections.emptyList());
-      for (SignedBeaconBlock block : blocks) {
-        final Bytes32 blockRoot = block.getMessage().hash_tree_root();
-        processBlock(parentState, block)
-            .ifPresent(
-                state -> {
-                  hotStates.put(blockRoot, state);
-                  parentRoots.push(blockRoot);
-                });
-      }
-    }
-
-    if (hotStates.size() != hotBlocksByRoot.size()) {
-      LOG.trace(
-          "Only {} hot states produced for {} hot blocks.  Some hot blocks must be incompatible with the latest finalized block.",
-          hotStates.size(),
-          hotBlocksByRoot.size());
-
-      Transaction transaction = db.startTransaction();
-      hotBlocksByRoot.keySet().stream()
-          .filter(signedBeaconBlock -> !hotStates.containsKey(signedBeaconBlock))
-          .forEach(blockRoot -> transaction.delete(V3Schema.HOT_BLOCKS_BY_ROOT, blockRoot));
-      transaction.commit();
-    }
-  }
-
-  private final Optional<BeaconState> processBlock(
-      final BeaconState preState, final SignedBeaconBlock block) {
-    StateTransition stateTransition = new StateTransition();
-    try {
-      final BeaconState postState = stateTransition.initiate(preState, block);
-      return Optional.of(postState);
-    } catch (StateTransitionException e) {
-      LOG.error(
-          "Unable to produce state for block at slot {} ({})",
-          block.getSlot(),
-          block.getMessage().hash_tree_root());
-      return Optional.empty();
-    }
-  }
-
-  private static class V3Updater implements Updater {
-
-    private final Transaction transaction;
-    private final NavigableMap<UnsignedLong, Set<Bytes32>> hotRootsBySlotCache;
-    private final Map<Bytes32, BeaconState> hotStates;
-
-    // Hot root by slot updates
-    private final NavigableMap<UnsignedLong, Set<Bytes32>> hotRootsBySlotAdditions =
-        new ConcurrentSkipListMap<>();
-    private final Set<UnsignedLong> prunedSlots = new HashSet<>();
-
-    // Hot state updates
-    private final Map<Bytes32, BeaconState> newHotStates = new HashMap<>();
-    private final Set<Bytes32> deletedStates = new HashSet<>();
-
-    V3Updater(
-        final RocksDbInstance db,
-        final NavigableMap<UnsignedLong, Set<Bytes32>> hotRootsBySlotCache,
-        final Map<Bytes32, BeaconState> hotStates) {
+    V3Updater(final RocksDbAccessor db) {
       this.transaction = db.startTransaction();
-      this.hotRootsBySlotCache = hotRootsBySlotCache;
-      this.hotStates = hotStates;
     }
 
     @Override
@@ -281,44 +213,26 @@ public class V3RocksDbDao implements RocksDbDao {
     }
 
     @Override
-    public void setLatestFinalizedState(final BeaconState state) {
-      transaction.put(V3Schema.LATEST_FINALIZED_STATE, state);
-    }
-
-    @Override
     public void setFinalizedCheckpoint(final Checkpoint checkpoint) {
       transaction.put(V3Schema.FINALIZED_CHECKPOINT, checkpoint);
     }
 
     @Override
-    public void addCheckpointState(final Checkpoint checkpoint, final BeaconState state) {
-      transaction.put(V3Schema.CHECKPOINT_STATES, checkpoint, state);
-    }
-
-    @Override
-    public void addCheckpointStates(final Map<Checkpoint, BeaconState> checkpointStates) {
-      checkpointStates.forEach(this::addCheckpointState);
+    public void setLatestFinalizedState(final BeaconState state) {
+      transaction.put(V3Schema.LATEST_FINALIZED_STATE, state);
     }
 
     @Override
     public void addHotBlock(final SignedBeaconBlock block) {
-      final Bytes32 blockRoot = block.getMessage().hash_tree_root();
+      final Bytes32 blockRoot = block.getRoot();
       transaction.put(V3Schema.HOT_BLOCKS_BY_ROOT, blockRoot, block);
-      hotRootsBySlotAdditions
-          .computeIfAbsent(block.getSlot(), key -> new HashSet<>())
-          .add(blockRoot);
     }
 
     @Override
     public void addFinalizedBlock(final SignedBeaconBlock block) {
-      final Bytes32 root = block.getMessage().hash_tree_root();
+      final Bytes32 root = block.getRoot();
       transaction.put(V3Schema.FINALIZED_ROOTS_BY_SLOT, block.getSlot(), root);
       transaction.put(V3Schema.FINALIZED_BLOCKS_BY_ROOT, root, block);
-    }
-
-    @Override
-    public void addHotState(final Bytes32 blockRoot, final BeaconState state) {
-      newHotStates.put(blockRoot, state);
     }
 
     @Override
@@ -332,8 +246,14 @@ public class V3RocksDbDao implements RocksDbDao {
     }
 
     @Override
-    public void addHotStates(final Map<Bytes32, BeaconState> states) {
-      states.forEach(this::addHotState);
+    public void addHotStateRoot(final Bytes32 stateRoot, final SlotAndBlockRoot slotAndBlockRoot) {
+      transaction.put(V3Schema.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT, stateRoot, slotAndBlockRoot);
+    }
+
+    @Override
+    public void pruneHotStateRoots(final List<Bytes32> stateRoots) {
+      stateRoots.stream()
+          .forEach((root) -> transaction.delete(V3Schema.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT, root));
     }
 
     @Override
@@ -343,44 +263,27 @@ public class V3RocksDbDao implements RocksDbDao {
     }
 
     @Override
-    public void deleteCheckpointState(final Checkpoint checkpoint) {
-      transaction.delete(V3Schema.CHECKPOINT_STATES, checkpoint);
+    public void deleteHotBlock(final Bytes32 blockRoot) {
+      transaction.delete(V3Schema.HOT_BLOCKS_BY_ROOT, blockRoot);
     }
 
     @Override
-    public Set<Bytes32> pruneHotBlocksAtSlotsOlderThan(final UnsignedLong slot) {
-      final Map<UnsignedLong, Set<Bytes32>> toRemove = hotRootsBySlotAdditions.headMap(slot);
-      toRemove.putAll(hotRootsBySlotCache.headMap(slot));
+    public void addMinGenesisTimeBlock(final MinGenesisTimeBlockEvent event) {
+      transaction.put(V3Schema.MIN_GENESIS_TIME_BLOCK, event);
+    }
 
-      final Set<Bytes32> prunedRoots =
-          toRemove.values().stream().flatMap(Set::stream).collect(Collectors.toSet());
-      for (Set<Bytes32> hotRoots : toRemove.values()) {
-        for (Bytes32 root : hotRoots) {
-          newHotStates.remove(root);
-          deletedStates.add(root);
-          transaction.delete(V3Schema.HOT_BLOCKS_BY_ROOT, root);
-        }
-      }
-      hotRootsBySlotAdditions.keySet().removeAll(toRemove.keySet());
-      prunedSlots.addAll(toRemove.keySet());
+    @Override
+    public void addDepositsFromBlockEvent(final DepositsFromBlockEvent event) {
+      transaction.put(V3Schema.DEPOSITS_FROM_BLOCK_EVENTS, event.getBlockNumber(), event);
+    }
 
-      return prunedRoots;
+    @Override
+    public void putProtoArraySnapshot(ProtoArraySnapshot newProtoArray) {
+      transaction.put(V3Schema.PROTO_ARRAY_SNAPSHOT, newProtoArray);
     }
 
     @Override
     public void commit() {
-      // Commit slot updates
-      hotRootsBySlotCache.keySet().removeAll(prunedSlots);
-      hotRootsBySlotAdditions.forEach(
-          (slot, roots) -> {
-            final Set<Bytes32> currentRoots =
-                hotRootsBySlotCache.computeIfAbsent(
-                    slot, __ -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
-            currentRoots.addAll(roots);
-          });
-      // Commit hot state updates
-      deletedStates.forEach(hotStates::remove);
-      hotStates.putAll(newHotStates);
       // Commit db updates
       transaction.commit();
       close();
@@ -388,13 +291,6 @@ public class V3RocksDbDao implements RocksDbDao {
 
     @Override
     public void cancel() {
-      // Clear slot updates
-      prunedSlots.clear();
-      hotRootsBySlotAdditions.clear();
-      // Clear hot state updates
-      deletedStates.clear();
-      newHotStates.clear();
-      // Clear db updates
       transaction.rollback();
       close();
     }

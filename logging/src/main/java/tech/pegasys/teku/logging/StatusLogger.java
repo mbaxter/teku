@@ -13,10 +13,13 @@
 
 package tech.pegasys.teku.logging;
 
+import static java.util.stream.Collectors.joining;
 import static tech.pegasys.teku.logging.LoggingConfigurator.STATUS_LOGGER_NAME;
 
 import java.nio.file.Path;
+import java.util.List;
 import org.apache.commons.lang3.time.DateFormatUtils;
+import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -30,17 +33,28 @@ public class StatusLogger {
     this.log = LogManager.getLogger(name);
   }
 
+  public void onStartup(final String version) {
+    log.info("Teku version: {}", version);
+  }
+
+  public void fatalError(final String description, final Throwable cause) {
+    log.fatal("Exiting due to fatal error in {}", description, cause);
+  }
+
   public void specificationFailure(final String description, final Throwable cause) {
     log.warn("Spec failed for {}: {}", description, cause, cause);
   }
 
   public void unexpectedFailure(final String description, final Throwable cause) {
-    log.fatal(
-        "PLEASE FIX OR REPORT | Unexpected exception thrown for {}: {}", cause, description, cause);
+    log.error("PLEASE FIX OR REPORT | Unexpected exception thrown for {}", description, cause);
   }
 
   public void listeningForLibP2P(final String address) {
     log.info("Listening for connections on: {}", address);
+  }
+
+  public void listeningForDiscv5PreGenesis(final String enr) {
+    log.info("PreGenesis Local ENR: {}", enr);
   }
 
   public void listeningForDiscv5(final String enr) {
@@ -64,6 +78,18 @@ public class StatusLogger {
     log.error(message, file.toString(), cause);
   }
 
+  public void validatorsInitialised(final List<String> validators) {
+    if (validators.size() > 100) {
+      log.info("Loaded {} validators", validators.size());
+      log.debug("validators: {}", () -> validators.stream().collect(joining(", ")));
+    } else {
+      log.info(
+          "Loaded {} Validators: {}",
+          validators::size,
+          () -> validators.stream().collect(joining(", ")));
+    }
+  }
+
   public void beginInitializingChainData() {
     log.info("Initializing storage");
   }
@@ -77,6 +103,12 @@ public class StatusLogger {
         "Starting with mocked start interoperability mode with genesis time {} and {} validators",
         () -> DateFormatUtils.format(genesisTime * 1000, "yyyy-MM-dd hh:mm:ss"),
         () -> size);
+  }
+
+  public void timeUntilGenesis(final long timeToGenesis) {
+    log.info(
+        "{} until genesis time is reached",
+        () -> DurationFormatUtils.formatDurationWords(timeToGenesis * 1000, true, true));
   }
 
   public void loadingGenesisFile(final String genesisFile) {
@@ -96,10 +128,18 @@ public class StatusLogger {
   }
 
   public void minGenesisTimeReached() {
-    log.info("Minimum genesis time reached");
+    log.info("ETH1 block satisfying minimum genesis time found");
   }
 
   public void dataPathSet(final String dataPath) {
     log.info("Using data path: {}", dataPath);
+  }
+
+  public void eth1ServiceDown(final long interval) {
+    log.warn("Eth1 service down for {}s, retrying", interval);
+  }
+
+  public void eth1AtHead() {
+    log.info("Eth1 tracker successfully caught up to chain head");
   }
 }

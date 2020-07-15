@@ -14,6 +14,7 @@
 package tech.pegasys.teku.datastructures.blocks;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.primitives.UnsignedLong;
 import java.util.Objects;
@@ -26,9 +27,12 @@ public class SignedBlockAndState {
   private final BeaconState state;
 
   public SignedBlockAndState(final SignedBeaconBlock block, final BeaconState state) {
+    checkNotNull(block);
+    checkNotNull(state);
     checkArgument(
         Objects.equals(block.getMessage().getState_root(), state.hash_tree_root()),
         "State must belong to the given block");
+
     this.block = block;
     this.state = state;
   }
@@ -41,6 +45,10 @@ public class SignedBlockAndState {
     return block.getRoot();
   }
 
+  public Bytes32 getParentRoot() {
+    return block.getParent_root();
+  }
+
   public UnsignedLong getSlot() {
     return getBlock().getSlot();
   }
@@ -51,5 +59,22 @@ public class SignedBlockAndState {
 
   public BeaconState getState() {
     return state;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (o == this) {
+      return true;
+    }
+    if (!(o instanceof SignedBlockAndState)) {
+      return false;
+    }
+    final SignedBlockAndState that = (SignedBlockAndState) o;
+    return Objects.equals(block, that.block) && Objects.equals(state, that.state);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(block, state);
   }
 }

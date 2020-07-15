@@ -25,16 +25,50 @@ public class DepositOptionsTest extends AbstractBeaconNodeCommandTest {
   @Test
   public void shouldReadDepositOptionsFromConfigurationFile() {
     final TekuConfiguration config = getTekuConfigurationFromFile("depositOptions_config.yaml");
-    Eth1Address address = Eth1Address.fromHexString("0xfe3b557e8fb62b89f4916b721be55ceb828dbd73");
+    final Eth1Address address =
+        Eth1Address.fromHexString("0xfe3b557e8fb62b89f4916b721be55ceb828dbd73");
 
-    assertThat(config.isEth1Enabled()).isFalse();
+    assertThat(config.isEth1Enabled()).isTrue();
     assertThat(config.getEth1DepositContractAddress()).isEqualTo(address);
     assertThat(config.getEth1Endpoint()).isEqualTo("http://example.com:1234/path/");
+    assertThat(config.isEth1DepositsFromStorageEnabled()).isFalse();
   }
 
   @Test
-  public void eth1Enabled_shouldNotRequireAValue() {
-    final TekuConfiguration config = getTekuConfigurationFromArguments("--eth1-enabled");
-    assertThat(config.isEth1Enabled()).isTrue();
+  public void shouldReportEth1EnabledIfEndpointSpecified() {
+    final String[] args = {
+      "--eth1-endpoint",
+      "http://example.com:1234/path/",
+      "--eth1-deposit-contract-address",
+      "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73"
+    };
+    final TekuConfiguration tekuConfiguration = getTekuConfigurationFromArguments(args);
+    assertThat(tekuConfiguration.isEth1Enabled()).isTrue();
+  }
+
+  @Test
+  public void shouldReportEth1DisabledIfEndpointNotSpecified() {
+    final TekuConfiguration tekuConfigurationFromArguments = getTekuConfigurationFromArguments();
+    assertThat(tekuConfigurationFromArguments.isEth1Enabled()).isFalse();
+  }
+
+  @Test
+  public void shouldDisableLoadFromStorageByDefault() {
+    final TekuConfiguration tekuConfigurationFromArguments = getTekuConfigurationFromArguments();
+    assertThat(tekuConfigurationFromArguments.isEth1DepositsFromStorageEnabled()).isTrue();
+  }
+
+  @Test
+  public void eth1Deposit_requiredIfEth1Endpoint() {
+    final String[] args = {
+      "--network", "minimal", "--eth1-endpoint", "http://example.com:1234/path/"
+    };
+
+    beaconNodeCommand.parse(args);
+    final String str = getCommandLineOutput();
+    assertThat(str).contains("eth1-deposit");
+    assertThat(str).contains("To display full help:");
+    assertThat(str).contains("--help");
+    assertThat(str).doesNotContain("Default");
   }
 }

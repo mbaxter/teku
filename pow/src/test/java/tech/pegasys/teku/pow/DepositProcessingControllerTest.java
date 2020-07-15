@@ -17,20 +17,19 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
-import static tech.pegasys.teku.util.config.Constants.ETH1_FOLLOW_DISTANCE;
 
 import com.google.common.primitives.UnsignedLong;
-import io.reactivex.BackpressureStrategy;
-import io.reactivex.Flowable;
-import io.reactivex.subjects.PublishSubject;
 import java.math.BigInteger;
 import org.apache.tuweni.bytes.Bytes32;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatcher;
+import org.mockito.Mockito;
 import org.web3j.protocol.core.methods.response.EthBlock;
+import tech.pegasys.teku.pow.Eth1HeadTracker.HeadUpdatedSubscriber;
 import tech.pegasys.teku.pow.api.Eth1EventsChannel;
 import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.util.async.SafeFuture;
@@ -39,38 +38,21 @@ import tech.pegasys.teku.util.config.Constants;
 
 public class DepositProcessingControllerTest {
 
-  private Eth1Provider eth1Provider;
-  private Eth1EventsChannel eth1EventsChannel;
-  private DepositFetcher depositFetcher;
-  private StubAsyncRunner asyncRunner;
+  private final Eth1Provider eth1Provider = mock(Eth1Provider.class);
+  private final Eth1EventsChannel eth1EventsChannel = mock(Eth1EventsChannel.class);
+  private final DepositFetcher depositFetcher = mock(DepositFetcher.class);
+  private final Eth1BlockFetcher eth1BlockFetcher = mock(Eth1BlockFetcher.class);
+  private final Eth1HeadTracker headTracker = Mockito.mock(Eth1HeadTracker.class);
+  private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
 
-  private DepositProcessingController depositProcessingController;
-  private PublishSubject<EthBlock.Block> blockPublisher;
-
-  @BeforeEach
-  void setUp() {
-    eth1Provider = mock(Eth1Provider.class);
-    eth1EventsChannel = mock(Eth1EventsChannel.class);
-    depositFetcher = mock(DepositFetcher.class);
-    asyncRunner = new StubAsyncRunner();
-
-    depositProcessingController =
-        new DepositProcessingController(
-            eth1Provider, eth1EventsChannel, asyncRunner, depositFetcher);
-
-    blockPublisher = mockFlowablePublisher();
-  }
-
-  @Test
-  void restartOnSubscriptionFailure() {
-    blockPublisher.onError(new RuntimeException("Nope"));
-    depositProcessingController.startSubscription(BigInteger.ONE);
-    verify(eth1Provider).getLatestBlockFlowable();
-
-    asyncRunner.executeQueuedActions();
-
-    verify(eth1Provider, times(2)).getLatestBlockFlowable();
-  }
+  private final DepositProcessingController depositProcessingController =
+      new DepositProcessingController(
+          eth1Provider,
+          eth1EventsChannel,
+          asyncRunner,
+          depositFetcher,
+          eth1BlockFetcher,
+          headTracker);
 
   @Test
   void doesAnotherRequestWhenTheLatestCanonicalBlockGetsUpdatedDuringCurrentRequest() {
@@ -118,7 +100,7 @@ public class DepositProcessingControllerTest {
   @Test
   void fetchDepositsBlockOneBlockAtATime() {
 
-    Constants.MIN_GENESIS_DELAY = 1;
+    Constants.GENESIS_DELAY = UnsignedLong.valueOf(2);
     // calculateCandidateGenesisTimestamp will return
     // blockTime + 2
 
@@ -161,28 +143,43 @@ public class DepositProcessingControllerTest {
     verify(eth1EventsChannel).onMinGenesisTimeBlock(argThat(isEvent("0xbc", 3, 98)));
   }
 
+  @Test
+  void shouldNotifyEth1BlockFetcherWhenLatestCanonicalBlockIsReached() {
+    depositProcessingController.startSubscription(BigInteger.ZERO);
+    final SafeFuture<Void> firstDepositsRequest = new SafeFuture<>();
+    final SafeFuture<Void> secondDepositsRequest = new SafeFuture<>();
+    when(depositFetcher.fetchDepositsInRange(BigInteger.ZERO, BigInteger.valueOf(1000)))
+        .thenReturn(firstDepositsRequest);
+    when(depositFetcher.fetchDepositsInRange(BigInteger.valueOf(1001), BigInteger.valueOf(1010)))
+        .thenReturn(secondDepositsRequest);
+
+    pushLatestCanonicalBlockWithNumber(1000);
+    pushLatestCanonicalBlockWithNumber(1010);
+
+    // Completing the first request doesn't notify because a second request is still pending
+    firstDepositsRequest.complete(null);
+    verifyNoInteractions(eth1BlockFetcher);
+
+    // Second request brings us up to date with the latest block so we notify the block fetcher
+    secondDepositsRequest.complete(null);
+    verify(eth1BlockFetcher).onInSync(UnsignedLong.valueOf(1010));
+  }
+
   private void mockBlockForEth1Provider(String blockHash, long blockNumber, long timestamp) {
     EthBlock.Block block = mock(EthBlock.Block.class);
     when(block.getTimestamp()).thenReturn(BigInteger.valueOf(timestamp));
     when(block.getNumber()).thenReturn(BigInteger.valueOf(blockNumber));
     when(block.getHash()).thenReturn(blockHash);
-    when(eth1Provider.getGuaranteedEth1BlockFuture(UnsignedLong.valueOf(blockNumber)))
+    when(eth1Provider.getGuaranteedEth1Block(UnsignedLong.valueOf(blockNumber)))
         .thenReturn(SafeFuture.completedFuture(block));
   }
 
   private void pushLatestCanonicalBlockWithNumber(long latestBlockNumber) {
-    EthBlock.Block block = mock(EthBlock.Block.class);
-    when(block.getNumber())
-        .thenReturn(
-            BigInteger.valueOf(latestBlockNumber).add(ETH1_FOLLOW_DISTANCE.bigIntegerValue()));
-    blockPublisher.onNext(block);
-  }
-
-  private PublishSubject<EthBlock.Block> mockFlowablePublisher() {
-    PublishSubject<EthBlock.Block> ps = PublishSubject.create();
-    Flowable<EthBlock.Block> blockFlowable = ps.toFlowable(BackpressureStrategy.LATEST);
-    when(eth1Provider.getLatestBlockFlowable()).thenReturn(blockFlowable);
-    return ps;
+    final ArgumentCaptor<HeadUpdatedSubscriber> captor =
+        ArgumentCaptor.forClass(HeadUpdatedSubscriber.class);
+    verify(headTracker).subscribe(captor.capture());
+    final HeadUpdatedSubscriber subscriber = captor.getValue();
+    subscriber.onHeadUpdated(UnsignedLong.valueOf(latestBlockNumber));
   }
 
   private ArgumentMatcher<MinGenesisTimeBlockEvent> isEvent(

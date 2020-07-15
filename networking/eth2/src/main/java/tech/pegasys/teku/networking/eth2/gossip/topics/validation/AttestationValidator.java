@@ -17,10 +17,12 @@ import static com.google.common.primitives.UnsignedLong.ONE;
 import static com.google.common.primitives.UnsignedLong.ZERO;
 import static tech.pegasys.teku.datastructures.util.AttestationUtil.get_indexed_attestation;
 import static tech.pegasys.teku.datastructures.util.AttestationUtil.is_valid_indexed_attestation;
+import static tech.pegasys.teku.datastructures.util.CommitteeUtil.computeSubnetForAttestation;
 import static tech.pegasys.teku.datastructures.util.CommitteeUtil.get_beacon_committee;
-import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.ValidationResult.INVALID;
-import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.ValidationResult.SAVED_FOR_FUTURE;
-import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.ValidationResult.VALID;
+import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.InternalValidationResult.ACCEPT;
+import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.InternalValidationResult.IGNORE;
+import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.InternalValidationResult.REJECT;
+import static tech.pegasys.teku.networking.eth2.gossip.topics.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 import static tech.pegasys.teku.util.config.Constants.ATTESTATION_PROPAGATION_SLOT_RANGE;
 import static tech.pegasys.teku.util.config.Constants.SECONDS_PER_SLOT;
 import static tech.pegasys.teku.util.config.Constants.VALID_ATTESTATION_SET_SIZE;
@@ -29,11 +31,12 @@ import com.google.common.primitives.UnsignedLong;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
+import tech.pegasys.teku.datastructures.attestation.ValidateableAttestation;
 import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.operations.IndexedAttestation;
 import tech.pegasys.teku.datastructures.state.BeaconState;
-import tech.pegasys.teku.datastructures.util.CommitteeUtil;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.util.collections.ConcurrentLimitedSet;
 import tech.pegasys.teku.util.collections.LimitStrategy;
@@ -41,6 +44,7 @@ import tech.pegasys.teku.util.config.Constants;
 
 public class AttestationValidator {
 
+  private static final UnsignedLong MAX_FUTURE_SLOT_ALLOWANCE = UnsignedLong.valueOf(3);
   private static final UnsignedLong MILLIS_PER_SECOND = UnsignedLong.valueOf(1000);
   private static final UnsignedLong MAXIMUM_GOSSIP_CLOCK_DISPARITY =
       UnsignedLong.valueOf(Constants.MAXIMUM_GOSSIP_CLOCK_DISPARITY);
@@ -54,62 +58,61 @@ public class AttestationValidator {
     this.recentChainData = recentChainData;
   }
 
-  public ValidationResult validate(final Attestation attestation, final int receivedOnSubnetId) {
-    ValidationResult validationResult = singleAttestationChecks(attestation, receivedOnSubnetId);
-    if (validationResult != VALID) {
-      return validationResult;
+  public InternalValidationResult validate(
+      final ValidateableAttestation validateableAttestation, final int receivedOnSubnetId) {
+    Attestation attestation = validateableAttestation.getAttestation();
+    InternalValidationResult internalValidationResult = singleAttestationChecks(attestation);
+    if (internalValidationResult != ACCEPT) {
+      return internalValidationResult;
     }
 
-    validationResult = singleOrAggregateAttestationChecks(attestation);
-    if (validationResult != VALID) {
-      return validationResult;
+    internalValidationResult =
+        singleOrAggregateAttestationChecks(attestation, OptionalInt.of(receivedOnSubnetId));
+    if (internalValidationResult != ACCEPT) {
+      return internalValidationResult;
     }
 
     return addAndCheckFirstValidAttestation(attestation);
   }
 
-  private ValidationResult addAndCheckFirstValidAttestation(final Attestation attestation) {
+  private InternalValidationResult addAndCheckFirstValidAttestation(final Attestation attestation) {
     // The attestation is the first valid attestation received for the participating validator for
     // the slot, attestation.data.slot.
     if (!receivedValidAttestations.add(getValidatorAndTargetEpoch(attestation))) {
-      return INVALID;
+      return IGNORE;
     }
-    return VALID;
+    return ACCEPT;
   }
 
-  private ValidationResult singleAttestationChecks(
-      final Attestation attestation, final int receivedOnSubnetId) {
-    // The attestation's committee index (attestation.data.index) is for the correct subnet.
-    if (CommitteeUtil.getSubnetId(attestation) != receivedOnSubnetId) {
-      return INVALID;
-    }
-
+  private InternalValidationResult singleAttestationChecks(final Attestation attestation) {
     // The attestation is unaggregated -- that is, it has exactly one participating validator
     // (len([bit for bit in attestation.aggregation_bits if bit == 0b1]) == 1).
-    if (attestation.getAggregation_bits().countSetBits() != 1) {
-      return INVALID;
+    if (attestation.getAggregation_bits().getBitCount() != 1) {
+      return REJECT;
     }
 
     // The attestation is the first valid attestation received for the participating validator for
     // the slot, attestation.data.slot.
     if (receivedValidAttestations.contains(getValidatorAndTargetEpoch(attestation))) {
-      return INVALID;
+      return IGNORE;
     }
-    return VALID;
+    return ACCEPT;
   }
 
-  ValidationResult singleOrAggregateAttestationChecks(final Attestation attestation) {
+  InternalValidationResult singleOrAggregateAttestationChecks(
+      final Attestation attestation, final OptionalInt receivedOnSubnetId) {
     // attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a
     // MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. attestation.data.slot +
     // ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY
     // queue
     // future attestations for processing at the appropriate slot).
     final UnsignedLong currentTimeMillis = secondsToMillis(recentChainData.getStore().getTime());
-    if (isAfterPropagationSlotRange(currentTimeMillis, attestation)) {
-      return INVALID;
+    if (isCurrentTimeAfterAttestationPropagationSlotRange(currentTimeMillis, attestation)
+        || isFromFarFuture(attestation, currentTimeMillis)) {
+      return IGNORE;
     }
-    if (isBeforeMinimumBroadcastTime(attestation, currentTimeMillis)) {
-      return SAVED_FOR_FUTURE;
+    if (isCurrentTimeBeforeMinimumAttestationBroadcastTime(attestation, currentTimeMillis)) {
+      return SAVE_FOR_FUTURE;
     }
 
     // The block being voted for (attestation.data.beacon_block_root) passes validation.
@@ -118,24 +121,30 @@ public class AttestationValidator {
     final Optional<BeaconState> maybeState =
         recentChainData.getBlockState(attestation.getData().getBeacon_block_root());
     if (maybeState.isEmpty()) {
-      return SAVED_FOR_FUTURE;
+      return SAVE_FOR_FUTURE;
     }
 
     final BeaconState state = maybeState.get();
+
+    // The attestation's committee index (attestation.data.index) is for the correct subnet.
+    if (receivedOnSubnetId.isPresent()
+        && computeSubnetForAttestation(state, attestation) != receivedOnSubnetId.getAsInt()) {
+      return REJECT;
+    }
 
     final List<Integer> committee =
         get_beacon_committee(
             state, attestation.getData().getSlot(), attestation.getData().getIndex());
     if (committee.size() != attestation.getAggregation_bits().getCurrentSize()) {
-      return INVALID;
+      return REJECT;
     }
 
     // The signature of attestation is valid.
     final IndexedAttestation indexedAttestation = get_indexed_attestation(state, attestation);
-    if (!is_valid_indexed_attestation(state, indexedAttestation)) {
-      return INVALID;
+    if (!is_valid_indexed_attestation(state, indexedAttestation).isSuccessful()) {
+      return REJECT;
     }
-    return VALID;
+    return ACCEPT;
   }
 
   private ValidatorAndTargetEpoch getValidatorAndTargetEpoch(final Attestation attestation) {
@@ -145,14 +154,31 @@ public class AttestationValidator {
         attestation.getAggregation_bits().streamAllSetBits().findFirst().orElseThrow());
   }
 
-  private boolean isBeforeMinimumBroadcastTime(
+  private boolean isCurrentTimeBeforeMinimumAttestationBroadcastTime(
       final Attestation attestation, final UnsignedLong currentTimeMillis) {
     final UnsignedLong minimumBroadcastTimeMillis =
         minimumBroadcastTimeMillis(attestation.getData().getSlot());
     return currentTimeMillis.compareTo(minimumBroadcastTimeMillis) < 0;
   }
 
-  private boolean isAfterPropagationSlotRange(
+  private boolean isFromFarFuture(
+      final Attestation attestation, final UnsignedLong currentTimeMillis) {
+    final UnsignedLong attestationSlotTimeMillis =
+        secondsToMillis(
+            recentChainData
+                .getGenesisTime()
+                .plus(
+                    attestation
+                        .getEarliestSlotForForkChoiceProcessing()
+                        .times(UnsignedLong.valueOf(SECONDS_PER_SLOT))));
+    final UnsignedLong discardAttestationsAfterMillis =
+        currentTimeMillis.plus(
+            secondsToMillis(
+                MAX_FUTURE_SLOT_ALLOWANCE.times(UnsignedLong.valueOf(SECONDS_PER_SLOT))));
+    return attestationSlotTimeMillis.compareTo(discardAttestationsAfterMillis) > 0;
+  }
+
+  private boolean isCurrentTimeAfterAttestationPropagationSlotRange(
       final UnsignedLong currentTimeMillis, final Attestation attestation) {
     final UnsignedLong attestationSlot = attestation.getData().getSlot();
     return maximumBroadcastTimeMillis(attestationSlot).compareTo(currentTimeMillis) < 0;

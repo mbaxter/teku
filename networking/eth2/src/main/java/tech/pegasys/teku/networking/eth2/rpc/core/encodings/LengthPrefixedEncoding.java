@@ -13,9 +13,10 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.core.encodings;
 
-import java.io.InputStream;
+import io.netty.buffer.ByteBuf;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.teku.datastructures.networking.libp2p.rpc.EmptyMessage;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.Compressor;
 
 /**
@@ -23,9 +24,25 @@ import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.Compress
  * the length of the uncompressed payload
  */
 public class LengthPrefixedEncoding implements RpcEncoding {
+  private static final RpcByteBufDecoder<EmptyMessage> EMPTY_MESSAGE_DECODER =
+      new RpcByteBufDecoder<>() {
+        @Override
+        public Optional<EmptyMessage> decodeOneMessage(ByteBuf input) {
+          return Optional.of(EmptyMessage.EMPTY_MESSAGE);
+        }
+
+        @Override
+        public void complete() {}
+      };
+
   private final String name;
   private final RpcPayloadEncoders payloadEncoders;
   private final Compressor compressor;
+
+  @SuppressWarnings({"unchecked", "TypeParameterUnusedInFormals"})
+  private static <T> RpcByteBufDecoder<T> getEmptyMessageDecoder() {
+    return (RpcByteBufDecoder<T>) EMPTY_MESSAGE_DECODER;
+  }
 
   LengthPrefixedEncoding(
       final String name, final RpcPayloadEncoders payloadEncoders, final Compressor compressor) {
@@ -40,15 +57,20 @@ public class LengthPrefixedEncoding implements RpcEncoding {
     final RpcPayloadEncoder<T> payloadEncoder =
         payloadEncoders.getEncoder((Class<T>) message.getClass());
     final Bytes payload = payloadEncoder.encode(message);
+    if (payload.isEmpty()) {
+      return payload;
+    }
     return encodeMessageWithLength(payload);
   }
 
   @Override
-  public <T> T decodePayload(final InputStream inputStream, final Class<T> payloadType)
-      throws RpcException {
-    final LengthPrefixedPayloadDecoder<T> payloadDecoder =
-        new LengthPrefixedPayloadDecoder<>(payloadEncoders.getEncoder(payloadType), compressor);
-    return payloadDecoder.decodePayload(inputStream);
+  public <T> RpcByteBufDecoder<T> createDecoder(Class<T> payloadType) {
+    if (payloadType.equals(EmptyMessage.class)) {
+      return getEmptyMessageDecoder();
+    } else {
+      return new LengthPrefixedPayloadDecoder<>(
+          payloadEncoders.getEncoder(payloadType), compressor);
+    }
   }
 
   private Bytes encodeMessageWithLength(final Bytes payload) {

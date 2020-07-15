@@ -19,10 +19,11 @@ import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_star
 import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 
 import com.google.common.primitives.UnsignedLong;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
@@ -30,12 +31,14 @@ import java.util.TreeMap;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.core.signatures.MessageSignerService;
 import tech.pegasys.teku.core.signatures.TestMessageSignerService;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockBodyLists;
+import tech.pegasys.teku.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.datastructures.operations.Attestation;
@@ -51,10 +54,13 @@ import tech.pegasys.teku.util.config.Constants;
 
 /** A utility for building small, valid chains of blocks with states for testing */
 public class ChainBuilder {
+  private static final List<BLSKeyPair> DEFAULT_VALIDATOR_KEYS =
+      BLSKeyGenerator.generateKeyPairs(3);
 
   private final List<BLSKeyPair> validatorKeys;
   private final AttestationGenerator attestationGenerator;
   private final NavigableMap<UnsignedLong, SignedBlockAndState> blocks = new TreeMap<>();
+  private final Map<Bytes32, SignedBlockAndState> blocksByHash = new HashMap<>();
 
   private BlockProposalTestUtil blockProposalTestUtil = new BlockProposalTestUtil();
 
@@ -65,10 +71,19 @@ public class ChainBuilder {
 
     attestationGenerator = new AttestationGenerator(validatorKeys);
     blocks.putAll(existingBlocks);
+    existingBlocks.values().forEach(b -> blocksByHash.put(b.getRoot(), b));
+  }
+
+  public static ChainBuilder createDefault() {
+    return ChainBuilder.create(DEFAULT_VALIDATOR_KEYS);
   }
 
   public static ChainBuilder create(final List<BLSKeyPair> validatorKeys) {
     return new ChainBuilder(validatorKeys, Collections.emptyMap());
+  }
+
+  public Optional<SignedBeaconBlock> getBlock(final Bytes32 blockRoot) {
+    return Optional.ofNullable(blocksByHash.get(blockRoot)).map(SignedBlockAndState::getBlock);
   }
 
   /**
@@ -82,12 +97,12 @@ public class ChainBuilder {
   }
 
   public UnsignedLong getLatestSlot() {
-    asserChainIsNotEmpty();
+    assertChainIsNotEmpty();
     return getLatestBlockAndState().getBlock().getSlot();
   }
 
   public UnsignedLong getLatestEpoch() {
-    asserChainIsNotEmpty();
+    assertChainIsNotEmpty();
     final UnsignedLong slot = getLatestSlot();
     return compute_epoch_at_slot(slot);
   }
@@ -98,6 +113,14 @@ public class ChainBuilder {
 
   public Stream<SignedBlockAndState> streamBlocksAndStates(final long fromSlot, final long toSlot) {
     return streamBlocksAndStates(UnsignedLong.valueOf(fromSlot), UnsignedLong.valueOf(toSlot));
+  }
+
+  public Stream<SignedBlockAndState> streamBlocksAndStates(final long fromSlot) {
+    return streamBlocksAndStates(UnsignedLong.valueOf(fromSlot));
+  }
+
+  public Stream<SignedBlockAndState> streamBlocksAndStates(final UnsignedLong fromSlot) {
+    return streamBlocksAndStates(fromSlot, getLatestSlot());
   }
 
   public Stream<SignedBlockAndState> streamBlocksAndStates(
@@ -116,11 +139,11 @@ public class ChainBuilder {
   }
 
   public SignedBlockAndState getGenesis() {
-    return Optional.ofNullable(blocks.firstEntry()).map(Entry::getValue).orElse(null);
+    return Optional.ofNullable(blocks.firstEntry()).map(Map.Entry::getValue).orElse(null);
   }
 
   public SignedBlockAndState getLatestBlockAndState() {
-    return Optional.ofNullable(blocks.lastEntry()).map(Entry::getValue).orElse(null);
+    return Optional.ofNullable(blocks.lastEntry()).map(Map.Entry::getValue).orElse(null);
   }
 
   public SignedBlockAndState getBlockAndStateAtSlot(final long slot) {
@@ -152,7 +175,7 @@ public class ChainBuilder {
   }
 
   public SignedBlockAndState getLatestBlockAndStateAtSlot(final UnsignedLong slot) {
-    return Optional.ofNullable(blocks.floorEntry(slot)).map(Entry::getValue).orElse(null);
+    return Optional.ofNullable(blocks.floorEntry(slot)).map(Map.Entry::getValue).orElse(null);
   }
 
   public SignedBlockAndState getLatestBlockAndStateAtEpochBoundary(final long epoch) {
@@ -160,7 +183,7 @@ public class ChainBuilder {
   }
 
   public SignedBlockAndState getLatestBlockAndStateAtEpochBoundary(final UnsignedLong epoch) {
-    asserChainIsNotEmpty();
+    assertChainIsNotEmpty();
     final UnsignedLong slot = compute_start_slot_at_epoch(epoch);
     return getLatestBlockAndStateAtSlot(slot);
   }
@@ -170,14 +193,13 @@ public class ChainBuilder {
   }
 
   public Checkpoint getCurrentCheckpointForEpoch(final UnsignedLong epoch) {
-    asserChainIsNotEmpty();
+    assertChainIsNotEmpty();
     final SignedBeaconBlock block = getLatestBlockAndStateAtEpochBoundary(epoch).getBlock();
     return new Checkpoint(epoch, block.getMessage().hash_tree_root());
   }
 
   public SignedBlockAndState generateGenesis() {
     checkState(blocks.isEmpty(), "Genesis already created");
-    final UnsignedLong genesisSlot = UnsignedLong.valueOf(Constants.GENESIS_SLOT);
 
     // Generate genesis state
     final List<DepositData> initialDepositData =
@@ -191,21 +213,27 @@ public class ChainBuilder {
     final SignedBeaconBlock signedBlock = new SignedBeaconBlock(genesisBlock, BLSSignature.empty());
 
     final SignedBlockAndState blockAndState = new SignedBlockAndState(signedBlock, genesisState);
-    blocks.put(genesisSlot, blockAndState);
+    trackBlock(blockAndState);
     return blockAndState;
   }
 
-  public void generateBlocksUpToSlot(final long slot) throws StateTransitionException {
-    generateBlocksUpToSlot(UnsignedLong.valueOf(slot));
+  public List<SignedBlockAndState> generateBlocksUpToSlot(final long slot)
+      throws StateTransitionException {
+    return generateBlocksUpToSlot(UnsignedLong.valueOf(slot));
   }
 
-  public void generateBlocksUpToSlot(final UnsignedLong slot) throws StateTransitionException {
+  public List<SignedBlockAndState> generateBlocksUpToSlot(final UnsignedLong slot)
+      throws StateTransitionException {
     assertBlockCanBeGenerated();
+    final List<SignedBlockAndState> generated = new ArrayList<>();
 
     SignedBlockAndState latestBlock = getLatestBlockAndState();
     while (latestBlock.getState().getSlot().compareTo(slot) < 0) {
       latestBlock = generateNextBlock();
+      generated.add(latestBlock);
     }
+
+    return generated;
   }
 
   public SignedBlockAndState generateNextBlock() throws StateTransitionException {
@@ -278,12 +306,17 @@ public class ChainBuilder {
         .flatMap(head -> attestationGenerator.streamAttestations(head, head.getSlot()));
   }
 
-  private void asserChainIsNotEmpty() {
+  private void assertChainIsNotEmpty() {
     checkState(!blocks.isEmpty(), "Unable to execute operation on empty chain");
   }
 
   private void assertBlockCanBeGenerated() {
     checkState(!blocks.isEmpty(), "Genesis block must be created before blocks can be added.");
+  }
+
+  private void trackBlock(final SignedBlockAndState block) {
+    blocks.put(block.getSlot(), block);
+    blocksByHash.put(block.getRoot(), block);
   }
 
   private SignedBlockAndState appendNewBlockToChain(
@@ -295,10 +328,17 @@ public class ChainBuilder {
     final int proposerIndex = blockProposalTestUtil.getProposerIndexForSlot(preState, slot);
     final MessageSignerService signer = getSigner(proposerIndex);
     final SignedBlockAndState nextBlockAndState =
-        blockProposalTestUtil.createBlockWithAttestations(
-            signer, slot, preState, parentRoot, options.getAttestations());
+        blockProposalTestUtil.createBlock(
+            signer,
+            slot,
+            preState,
+            parentRoot,
+            Optional.of(options.getAttestations()),
+            Optional.empty(),
+            Optional.empty(),
+            options.getEth1Data());
 
-    blocks.put(slot, nextBlockAndState);
+    trackBlock(nextBlockAndState);
     return nextBlockAndState;
   }
 
@@ -316,6 +356,7 @@ public class ChainBuilder {
 
   public static final class BlockOptions {
     private SSZMutableList<Attestation> attestations = BeaconBlockBodyLists.createAttestations();
+    private Optional<Eth1Data> eth1Data = Optional.empty();
 
     private BlockOptions() {}
 
@@ -328,8 +369,17 @@ public class ChainBuilder {
       return this;
     }
 
+    public BlockOptions setEth1Data(final Eth1Data eth1Data) {
+      this.eth1Data = Optional.ofNullable(eth1Data);
+      return this;
+    }
+
     private SSZList<Attestation> getAttestations() {
       return attestations;
+    }
+
+    public Optional<Eth1Data> getEth1Data() {
+      return eth1Data;
     }
   }
 }

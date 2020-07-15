@@ -13,7 +13,10 @@
 
 package tech.pegasys.teku.networking.p2p.network;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.gossip.TopicChannel;
 import tech.pegasys.teku.networking.p2p.gossip.TopicHandler;
@@ -24,7 +27,7 @@ import tech.pegasys.teku.util.async.SafeFuture;
 public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork<T> {
   private final P2PNetwork<?> network;
 
-  public DelegatingP2PNetwork(final P2PNetwork<?> network) {
+  protected DelegatingP2PNetwork(final P2PNetwork<?> network) {
     this.network = network;
   }
 
@@ -69,9 +72,14 @@ public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork
   }
 
   @Override
+  public Optional<String> getDiscoveryAddress() {
+    return network.getDiscoveryAddress();
+  }
+
+  @Override
   public int getListenPort() {
     return network.getListenPort();
-  };
+  }
 
   @Override
   public SafeFuture<?> start() {
@@ -84,7 +92,17 @@ public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork
   }
 
   @Override
+  public SafeFuture<?> gossip(final String topic, final Bytes data) {
+    return network.gossip(topic, data);
+  }
+
+  @Override
   public TopicChannel subscribe(final String topic, final TopicHandler topicHandler) {
     return network.subscribe(topic, topicHandler);
+  }
+
+  @Override
+  public Map<String, Collection<NodeId>> getSubscribersByTopic() {
+    return network.getSubscribersByTopic();
   }
 }

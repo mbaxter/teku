@@ -19,10 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 
 class BLSTest {
@@ -36,6 +38,7 @@ class BLSTest {
   }
 
   @Test
+  // The empty signature is not a valid signature
   void succeedsWhenCallingVerifyWithEmptySignatureReturnsFalse() {
     assertFalse(
         BLS.verify(
@@ -49,6 +52,7 @@ class BLSTest {
   }
 
   @Test
+  // The empty signature is not a valid signature
   void succeedsWhenPassingEmptySignatureToAggregateSignaturesThrowsIllegalArgumentException() {
     BLSSignature signature1 = BLSSignature.random(1);
     BLSSignature signature2 = BLSSignature.empty();
@@ -75,5 +79,79 @@ class BLSTest {
     BLSSignature aggregatedSignature = BLS.aggregate(signatures);
 
     assertTrue(BLS.fastAggregateVerify(publicKeys, message, aggregatedSignature));
+  }
+
+  @Test
+  void succeedsWhenAggregateVerifyWithRepeatedMessagesReturnsFalse() {
+    Bytes message1 = Bytes.wrap("Hello, world 1!".getBytes(UTF_8));
+    Bytes message2 = Bytes.wrap("Hello, world 2!".getBytes(UTF_8));
+    BLSKeyPair keyPair1 = BLSKeyPair.random(1);
+    BLSKeyPair keyPair2 = BLSKeyPair.random(2);
+    BLSKeyPair keyPair3 = BLSKeyPair.random(3);
+
+    List<BLSPublicKey> publicKeys =
+        Arrays.asList(keyPair1.getPublicKey(), keyPair2.getPublicKey(), keyPair3.getPublicKey());
+    List<Bytes> messages = Arrays.asList(message1, message2, message2);
+    List<BLSSignature> signatures =
+        Arrays.asList(
+            BLS.sign(keyPair1.getSecretKey(), message1),
+            BLS.sign(keyPair2.getSecretKey(), message2),
+            BLS.sign(keyPair3.getSecretKey(), message2));
+    BLSSignature aggregatedSignature = BLS.aggregate(signatures);
+
+    assertFalse(BLS.aggregateVerify(publicKeys, messages, aggregatedSignature));
+  }
+
+  @Test
+  // The standard says that this is INVALID
+  void aggregateThrowsExceptionForEmptySignatureList() {
+    assertThrows(IllegalArgumentException.class, () -> BLS.aggregate(new ArrayList<>()));
+  }
+
+  @Test
+  // The standard says that this is INVALID
+  void aggregateVerifyReturnsFalseForEmptyPubkeysList() {
+    assertFalse(BLS.aggregateVerify(new ArrayList<>(), new ArrayList<>(), BLSSignature.empty()));
+  }
+
+  @Test
+  // The standard says that this is INVALID
+  void fastAggregateVerifyReturnsFalseForEmptyPubkeysList() {
+    assertFalse(BLS.fastAggregateVerify(new ArrayList<>(), Bytes.EMPTY, BLSSignature.empty()));
+  }
+
+  static final BLSPublicKey infinityG1 =
+      BLSPublicKey.fromBytesCompressed(
+          Bytes.fromHexString(
+              "0x"
+                  + "c0000000000000000000000000000000"
+                  + "00000000000000000000000000000000"
+                  + "00000000000000000000000000000000"));
+  static final BLSSignature infinityG2 =
+      BLSSignature.fromBytes(
+          Bytes.fromHexString(
+              "0x"
+                  + "c000000000000000000000000000000000000000000000000000000000000000"
+                  + "0000000000000000000000000000000000000000000000000000000000000000"
+                  + "0000000000000000000000000000000000000000000000000000000000000000"));
+  static final BLSSecretKey zeroSK = BLSSecretKey.fromBytes(Bytes32.ZERO);
+
+  @Test
+  void succeedsWhenPubkeyAndSignatureBothTheIdentityIsOK() {
+    // Any message should verify
+    Bytes message = Bytes.wrap("Hello, world!".getBytes(UTF_8));
+    assertTrue(BLS.verify(infinityG1, message, infinityG2));
+  }
+
+  @Test
+  void succeedsWhenZeroSecretKeyGivesInfinitePublicKey() {
+    assertEquals(infinityG1, new BLSPublicKey(zeroSK));
+  }
+
+  @Test
+  void succeedsWhenInfinitePublicKeyGivesInfiniteSignature() {
+    // Any message should result in the signature at infinity
+    Bytes message = Bytes.wrap("Hello, world!".getBytes(UTF_8));
+    assertEquals(infinityG2, BLS.sign(zeroSK, message));
   }
 }

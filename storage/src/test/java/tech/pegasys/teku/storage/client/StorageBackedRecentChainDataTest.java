@@ -26,14 +26,20 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.core.lookup.BlockProvider;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
-import tech.pegasys.teku.storage.Store;
+import tech.pegasys.teku.metrics.StubMetricsSystem;
+import tech.pegasys.teku.protoarray.StubProtoArrayStorageChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
 import tech.pegasys.teku.storage.api.ReorgEventChannel;
+import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StorageUpdateChannel;
 import tech.pegasys.teku.storage.api.StubFinalizedCheckpointChannel;
 import tech.pegasys.teku.storage.api.StubReorgEventChannel;
+import tech.pegasys.teku.storage.events.AnchorPoint;
+import tech.pegasys.teku.storage.store.StoreBuilder;
+import tech.pegasys.teku.storage.store.UpdatableStore;
 import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.async.StubAsyncRunner;
 
@@ -42,6 +48,7 @@ public class StorageBackedRecentChainDataTest {
   private static final BeaconState INITIAL_STATE =
       new DataStructureUtil(3).randomBeaconState(UnsignedLong.ZERO);
 
+  private final StorageQueryChannel storageQueryChannel = mock(StorageQueryChannel.class);
   private final StorageUpdateChannel storageUpdateChannel = mock(StorageUpdateChannel.class);
   private final FinalizedCheckpointChannel finalizedCheckpointChannel =
       new StubFinalizedCheckpointChannel();
@@ -51,50 +58,60 @@ public class StorageBackedRecentChainDataTest {
   @Test
   public void storageBackedClient_storeInitializeViaGetStoreRequest()
       throws ExecutionException, InterruptedException {
-    SafeFuture<Optional<Store>> storeRequestFuture = new SafeFuture<>();
-    when(storageUpdateChannel.onStoreRequest()).thenReturn(storeRequestFuture);
+    SafeFuture<Optional<StoreBuilder>> storeRequestFuture = new SafeFuture<>();
+    when(storageQueryChannel.onStoreRequest()).thenReturn(storeRequestFuture);
 
     final EventBus eventBus = new EventBus();
     final SafeFuture<RecentChainData> client =
         StorageBackedRecentChainData.create(
+            new StubMetricsSystem(),
             asyncRunner,
+            storageQueryChannel,
             storageUpdateChannel,
+            new StubProtoArrayStorageChannel(),
             finalizedCheckpointChannel,
             reorgEventChannel,
             eventBus);
 
     // We should have posted a request to get the store from storage
-    verify(storageUpdateChannel).onStoreRequest();
+    verify(storageQueryChannel).onStoreRequest();
 
     // Client shouldn't be initialized yet
     assertThat(client).isNotDone();
 
     // Post a store response to complete initialization
-    final Store genesisStore = Store.getForkChoiceStore(INITIAL_STATE);
-    storeRequestFuture.complete(Optional.of(genesisStore));
+    final StoreBuilder genesisStoreBuilder =
+        StoreBuilder.forkChoiceStoreBuilder(
+            new StubMetricsSystem(),
+            BlockProvider.NOOP,
+            AnchorPoint.fromGenesisState(INITIAL_STATE));
+    storeRequestFuture.complete(Optional.of(genesisStoreBuilder));
     assertThat(client).isCompleted();
     assertStoreInitialized(client.get());
     assertStoreIsSet(client.get());
-    assertThat(client.get().getStore()).isEqualTo(genesisStore);
+    assertThat(client.get().getStore()).isEqualTo(genesisStoreBuilder.build());
   }
 
   @Test
   public void storageBackedClient_storeInitializeViaNewGenesisState()
       throws ExecutionException, InterruptedException {
-    SafeFuture<Optional<Store>> storeRequestFuture = new SafeFuture<>();
-    when(storageUpdateChannel.onStoreRequest()).thenReturn(storeRequestFuture);
+    SafeFuture<Optional<StoreBuilder>> storeRequestFuture = new SafeFuture<>();
+    when(storageQueryChannel.onStoreRequest()).thenReturn(storeRequestFuture);
 
     final EventBus eventBus = new EventBus();
     final SafeFuture<RecentChainData> client =
         StorageBackedRecentChainData.create(
+            new StubMetricsSystem(),
             asyncRunner,
+            storageQueryChannel,
             storageUpdateChannel,
+            new StubProtoArrayStorageChannel(),
             finalizedCheckpointChannel,
             reorgEventChannel,
             eventBus);
 
     // We should have posted a request to get the store from storage
-    verify(storageUpdateChannel).onStoreRequest();
+    verify(storageQueryChannel).onStoreRequest();
     // Client shouldn't be initialized yet
     assertThat(client).isNotDone();
 
@@ -105,7 +122,11 @@ public class StorageBackedRecentChainDataTest {
     assertThat(client.get().getStore()).isNull();
 
     // Now set the genesis state
-    final Store genesisStore = Store.getForkChoiceStore(INITIAL_STATE);
+    final UpdatableStore genesisStore =
+        StoreBuilder.buildForkChoiceStore(
+            new StubMetricsSystem(),
+            BlockProvider.NOOP,
+            AnchorPoint.fromGenesisState(INITIAL_STATE));
     client.get().initializeFromGenesis(INITIAL_STATE);
     assertStoreInitialized(client.get());
     assertStoreIsSet(client.get());
@@ -115,22 +136,25 @@ public class StorageBackedRecentChainDataTest {
   @Test
   public void storageBackedClient_storeInitializeViaGetStoreRequestAfterTimeout()
       throws ExecutionException, InterruptedException {
-    SafeFuture<Optional<Store>> storeRequestFuture = new SafeFuture<>();
-    when(storageUpdateChannel.onStoreRequest())
+    SafeFuture<Optional<StoreBuilder>> storeRequestFuture = new SafeFuture<>();
+    when(storageQueryChannel.onStoreRequest())
         .thenReturn(SafeFuture.failedFuture(new TimeoutException()))
         .thenReturn(storeRequestFuture);
 
     final EventBus eventBus = new EventBus();
     final SafeFuture<RecentChainData> client =
         StorageBackedRecentChainData.create(
+            new StubMetricsSystem(),
             asyncRunner,
+            storageQueryChannel,
             storageUpdateChannel,
+            new StubProtoArrayStorageChannel(),
             finalizedCheckpointChannel,
             reorgEventChannel,
             eventBus);
 
     // We should have posted a request to get the store from storage
-    verify(storageUpdateChannel).onStoreRequest();
+    verify(storageQueryChannel).onStoreRequest();
 
     // Client shouldn't be initialized yet
     assertThat(client).isNotDone();
@@ -138,12 +162,16 @@ public class StorageBackedRecentChainDataTest {
     asyncRunner.executeQueuedActions();
 
     // Now set the genesis state
-    final Store genesisStore = Store.getForkChoiceStore(INITIAL_STATE);
-    storeRequestFuture.complete(Optional.of(genesisStore));
+    final StoreBuilder genesisStoreBuilder =
+        StoreBuilder.forkChoiceStoreBuilder(
+            new StubMetricsSystem(),
+            BlockProvider.NOOP,
+            AnchorPoint.fromGenesisState(INITIAL_STATE));
+    storeRequestFuture.complete(Optional.of(genesisStoreBuilder));
     assertThat(client).isCompleted();
     assertStoreInitialized(client.get());
     assertStoreIsSet(client.get());
-    assertThat(client.get().getStore()).isEqualTo(genesisStore);
+    assertThat(client.get().getStore()).isEqualTo(genesisStoreBuilder.build());
   }
 
   private void assertStoreInitialized(final RecentChainData client) {

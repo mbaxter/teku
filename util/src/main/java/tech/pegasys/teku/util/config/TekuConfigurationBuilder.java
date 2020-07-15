@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
+import org.apache.tuweni.bytes.Bytes32;
 
 public class TekuConfigurationBuilder {
   private static final boolean DEFAULT_P2P_SNAPPY_ENABLED = false;
@@ -49,8 +50,10 @@ public class TekuConfigurationBuilder {
   private int validatorExternalSignerTimeout;
   private Eth1Address eth1DepositContractAddress;
   private String eth1Endpoint;
+  private boolean eth1DepositsFromStorageEnabled;
   private boolean logColorEnabled;
   private boolean logIncludeEventsEnabled;
+  private boolean logIncludeValidatorDutiesEnabled;
   private LoggingDestination logDestination;
   private String logFile;
   private String logFileNamePattern;
@@ -63,15 +66,18 @@ public class TekuConfigurationBuilder {
   private int metricsPort;
   private String metricsInterface;
   private List<String> metricsCategories;
-  private List<String> metricsHostWhitelist;
+  private List<String> metricsHostAllowlist;
   private String dataPath;
   private StateStorageMode dataStorageMode;
+  private String dataStorageCreateDbVersion;
+  private long dataStorageFrequency;
   private int restApiPort;
   private boolean restApiDocsEnabled;
   private boolean restApiEnabled;
   private String restApiInterface;
+  private List<String> restApiHostAllowlist;
   private NetworkDefinition network;
-  private boolean eth1Enabled;
+  private Bytes32 graffiti;
 
   public TekuConfigurationBuilder setConstants(final String constants) {
     this.constants = constants;
@@ -217,11 +223,6 @@ public class TekuConfigurationBuilder {
     return this;
   }
 
-  public TekuConfigurationBuilder setEth1Enabled(final boolean eth1Enabled) {
-    this.eth1Enabled = eth1Enabled;
-    return this;
-  }
-
   public TekuConfigurationBuilder setEth1DepositContractAddress(
       final Eth1Address eth1DepositContractAddress) {
     this.eth1DepositContractAddress = eth1DepositContractAddress;
@@ -233,6 +234,12 @@ public class TekuConfigurationBuilder {
     return this;
   }
 
+  public TekuConfigurationBuilder setEth1DepositsFromStorageEnabled(
+      final boolean eth1DepositsFromStorageEnabled) {
+    this.eth1DepositsFromStorageEnabled = eth1DepositsFromStorageEnabled;
+    return this;
+  }
+
   public TekuConfigurationBuilder setLogColorEnabled(final boolean logColorEnabled) {
     this.logColorEnabled = logColorEnabled;
     return this;
@@ -241,6 +248,12 @@ public class TekuConfigurationBuilder {
   public TekuConfigurationBuilder setLogIncludeEventsEnabled(
       final boolean logIncludeEventsEnabled) {
     this.logIncludeEventsEnabled = logIncludeEventsEnabled;
+    return this;
+  }
+
+  public TekuConfigurationBuilder setLogIncludeValidatorDutiesEnabled(
+      final boolean logIncludeValidatorDutiesEnabled) {
+    this.logIncludeValidatorDutiesEnabled = logIncludeValidatorDutiesEnabled;
     return this;
   }
 
@@ -305,8 +318,8 @@ public class TekuConfigurationBuilder {
     return this;
   }
 
-  public TekuConfigurationBuilder setMetricsHostWhitelist(final List<String> metricsHostWhitelist) {
-    this.metricsHostWhitelist = metricsHostWhitelist;
+  public TekuConfigurationBuilder setMetricsHostAllowlist(final List<String> metricsHostAllowlist) {
+    this.metricsHostAllowlist = metricsHostAllowlist;
     return this;
   }
 
@@ -317,6 +330,17 @@ public class TekuConfigurationBuilder {
 
   public TekuConfigurationBuilder setDataStorageMode(final StateStorageMode dataStorageMode) {
     this.dataStorageMode = dataStorageMode;
+    return this;
+  }
+
+  public TekuConfigurationBuilder setDataStorageFrequency(final long dataStorageFrequency) {
+    this.dataStorageFrequency = dataStorageFrequency;
+    return this;
+  }
+
+  public TekuConfigurationBuilder setDataStorageCreateDbVersion(
+      final String dataStorageCreateDbVersion) {
+    this.dataStorageCreateDbVersion = dataStorageCreateDbVersion;
     return this;
   }
 
@@ -340,6 +364,16 @@ public class TekuConfigurationBuilder {
     return this;
   }
 
+  public TekuConfigurationBuilder setRestApiHostAllowlist(final List<String> restApiHostAllowlist) {
+    this.restApiHostAllowlist = restApiHostAllowlist;
+    return this;
+  }
+
+  public TekuConfigurationBuilder setGraffiti(final Bytes32 graffiti) {
+    this.graffiti = graffiti;
+    return this;
+  }
+
   public TekuConfigurationBuilder setNetwork(final NetworkDefinition network) {
     this.network = network;
     return this;
@@ -359,6 +393,11 @@ public class TekuConfigurationBuilder {
       eth1Endpoint = getOrOptionalDefault(eth1Endpoint, network::getEth1Endpoint);
       p2pSnappyEnabled =
           getOrOptionalDefault(p2pSnappyEnabled, network::getSnappyCompressionEnabled);
+    }
+
+    if (eth1DepositContractAddress == null && eth1Endpoint != null) {
+      throw new InvalidConfigurationException(
+          "eth1-deposit-contract-address is required if eth1-endpoint is specified.");
     }
 
     p2pSnappyEnabled = Optional.ofNullable(p2pSnappyEnabled).orElse(DEFAULT_P2P_SNAPPY_ENABLED);
@@ -390,11 +429,12 @@ public class TekuConfigurationBuilder {
         validatorExternalSignerPublicKeys,
         validatorExternalSignerUrl,
         validatorExternalSignerTimeout,
-        eth1Enabled,
         eth1DepositContractAddress,
         eth1Endpoint,
+        eth1DepositsFromStorageEnabled,
         logColorEnabled,
         logIncludeEventsEnabled,
+        logIncludeValidatorDutiesEnabled,
         logDestination,
         logFile,
         logFileNamePattern,
@@ -407,13 +447,17 @@ public class TekuConfigurationBuilder {
         metricsPort,
         metricsInterface,
         metricsCategories,
-        metricsHostWhitelist,
+        metricsHostAllowlist,
         dataPath,
         dataStorageMode,
+        dataStorageFrequency,
+        dataStorageCreateDbVersion,
         restApiPort,
         restApiDocsEnabled,
         restApiEnabled,
-        restApiInterface);
+        restApiInterface,
+        restApiHostAllowlist,
+        graffiti);
   }
 
   private <T> T getOrDefault(final T explicitValue, final Supplier<T> predefinedNetworkValue) {

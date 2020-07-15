@@ -15,27 +15,24 @@ package tech.pegasys.teku;
 
 import static tech.pegasys.teku.logging.StatusLogger.STATUS_LOG;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.EventBus;
-import com.google.common.eventbus.SubscriberExceptionContext;
-import com.google.common.eventbus.SubscriberExceptionHandler;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.vertx.core.Vertx;
-import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.data.recorder.SSZTransitionRecorder;
-import tech.pegasys.teku.events.ChannelExceptionHandler;
 import tech.pegasys.teku.events.EventChannels;
 import tech.pegasys.teku.logging.LoggingConfiguration;
 import tech.pegasys.teku.logging.LoggingConfigurator;
-import tech.pegasys.teku.logging.StatusLogger;
 import tech.pegasys.teku.metrics.MetricsEndpoint;
+import tech.pegasys.teku.service.serviceutils.AsyncRunnerFactory;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
 import tech.pegasys.teku.services.ServiceController;
+import tech.pegasys.teku.util.async.AsyncRunner;
+import tech.pegasys.teku.util.cli.VersionProvider;
 import tech.pegasys.teku.util.config.Constants;
 import tech.pegasys.teku.util.config.TekuConfiguration;
 import tech.pegasys.teku.util.time.SystemTimeProvider;
@@ -47,24 +44,39 @@ public class BeaconNode {
       Executors.newCachedThreadPool(
           new ThreadFactoryBuilder().setDaemon(true).setNameFormat("events-%d").build());
 
+  private final AsyncRunnerFactory asyncRunnerFactory = new AsyncRunnerFactory();
   private final ServiceController serviceController;
-  private final ServiceConfig serviceConfig;
   private final EventChannels eventChannels;
   private final MetricsEndpoint metricsEndpoint;
-  private final EventBus eventBus;
 
   public BeaconNode(final TekuConfiguration config) {
 
+    LoggingConfigurator.update(
+        new LoggingConfiguration(
+            config.isLogColorEnabled(),
+            config.isLogIncludeEventsEnabled(),
+            config.isLogIncludeValidatorDutiesEnabled(),
+            config.getLogDestination(),
+            config.getLogFile(),
+            config.getLogFileNamePattern()));
+
+    STATUS_LOG.onStartup(VersionProvider.VERSION);
     this.metricsEndpoint = new MetricsEndpoint(config, vertx);
     final MetricsSystem metricsSystem = metricsEndpoint.getMetricsSystem();
-    final EventBusExceptionHandler subscriberExceptionHandler =
-        new EventBusExceptionHandler(STATUS_LOG);
+    final TekuDefaultExceptionHandler subscriberExceptionHandler =
+        new TekuDefaultExceptionHandler();
     this.eventChannels = new EventChannels(subscriberExceptionHandler, metricsSystem);
-    this.eventBus = new AsyncEventBus(threadPool, subscriberExceptionHandler);
+    final EventBus eventBus = new AsyncEventBus(threadPool, subscriberExceptionHandler);
 
-    this.serviceConfig =
-        new ServiceConfig(new SystemTimeProvider(), eventBus, eventChannels, metricsSystem, config);
-    this.serviceConfig.getConfig().validateConfig();
+    final ServiceConfig serviceConfig =
+        new ServiceConfig(
+            asyncRunnerFactory,
+            new SystemTimeProvider(),
+            eventBus,
+            eventChannels,
+            metricsSystem,
+            config);
+    serviceConfig.getConfig().validateConfig();
     Constants.setConstants(config.getConstants());
 
     final String transitionRecordDir = config.getTransitionRecordDirectory();
@@ -75,15 +87,6 @@ public class BeaconNode {
     }
 
     this.serviceController = new ServiceController(serviceConfig);
-
-    LoggingConfigurator.update(
-        new LoggingConfiguration(
-            config.isLogColorEnabled(),
-            config.isLogIncludeEventsEnabled(),
-            config.getLogDestination(),
-            config.getLogFile(),
-            config.getLogFileNamePattern()));
-
     STATUS_LOG.dataPathSet(serviceConfig.getConfig().getDataPath());
   }
 
@@ -93,64 +96,16 @@ public class BeaconNode {
   }
 
   public void stop() {
-    serviceController.stop().reportExceptions();
+    // Stop processing new events
     eventChannels.stop();
+    threadPool.shutdownNow();
+
+    // Stop async actions
+    asyncRunnerFactory.getAsyncRunners().forEach(AsyncRunner::shutdown);
+
+    // Stop services. This includes closing the database.
+    serviceController.stop().reportExceptions();
     metricsEndpoint.stop();
     vertx.close();
-  }
-}
-
-@VisibleForTesting
-final class EventBusExceptionHandler
-    implements SubscriberExceptionHandler, ChannelExceptionHandler {
-
-  private final StatusLogger log;
-
-  EventBusExceptionHandler(final StatusLogger log) {
-    this.log = log;
-  }
-
-  @Override
-  public void handleException(final Throwable exception, final SubscriberExceptionContext context) {
-    handleException(
-        exception,
-        "event '"
-            + context.getEvent().getClass().getName()
-            + "'"
-            + " in handler '"
-            + context.getSubscriber().getClass().getName()
-            + "'"
-            + " (method  '"
-            + context.getSubscriberMethod().getName()
-            + "')");
-  }
-
-  @Override
-  public void handleException(
-      final Throwable error,
-      final Object subscriber,
-      final Method invokedMethod,
-      final Object[] args) {
-    handleException(
-        error,
-        "event '"
-            + invokedMethod.getDeclaringClass()
-            + "."
-            + invokedMethod.getName()
-            + "' in handler '"
-            + subscriber.getClass().getName()
-            + "'");
-  }
-
-  private void handleException(final Throwable exception, final String subscriberDescription) {
-    if (isSpecFailure(exception)) {
-      log.specificationFailure(subscriberDescription, exception);
-    } else {
-      log.unexpectedFailure(subscriberDescription, exception);
-    }
-  }
-
-  private static boolean isSpecFailure(final Throwable exception) {
-    return exception instanceof IllegalArgumentException;
   }
 }

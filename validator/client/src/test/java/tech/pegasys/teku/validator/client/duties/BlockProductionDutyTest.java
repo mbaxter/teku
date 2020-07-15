@@ -14,9 +14,11 @@
 package tech.pegasys.teku.validator.client.duties;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_epoch_at_slot;
 import static tech.pegasys.teku.util.async.SafeFuture.completedFuture;
@@ -24,6 +26,8 @@ import static tech.pegasys.teku.util.async.SafeFuture.failedFuture;
 
 import com.google.common.primitives.UnsignedLong;
 import java.util.Optional;
+import java.util.Set;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -32,6 +36,7 @@ import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
+import tech.pegasys.teku.logging.ValidatorLogger;
 import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.ForkProvider;
@@ -44,8 +49,11 @@ class BlockProductionDutyTest {
   private final ForkProvider forkProvider = mock(ForkProvider.class);
   private final ValidatorApiChannel validatorApiChannel = mock(ValidatorApiChannel.class);
   private final Signer signer = mock(Signer.class);
-  private final Validator validator = new Validator(dataStructureUtil.randomPublicKey(), signer);
+  private final Bytes32 graffiti = dataStructureUtil.randomBytes32();
+  private final Validator validator =
+      new Validator(dataStructureUtil.randomPublicKey(), signer, Optional.of(graffiti));
   private final ForkInfo fork = dataStructureUtil.randomForkInfo();
+  private final ValidatorLogger validatorLogger = mock(ValidatorLogger.class);
 
   private final BlockProductionDuty duty =
       new BlockProductionDuty(validator, SLOT, forkProvider, validatorApiChannel);
@@ -56,20 +64,28 @@ class BlockProductionDutyTest {
   }
 
   @Test
+  public void shouldReportCorrectProducedType() {
+    assertThat(duty.getProducedType()).isEqualTo("block");
+  }
+
+  @Test
   public void shouldCreateAndPublishBlock() {
     final BLSSignature randaoReveal = dataStructureUtil.randomSignature();
     final BLSSignature blockSignature = dataStructureUtil.randomSignature();
     final BeaconBlock unsignedBlock = dataStructureUtil.randomBeaconBlock(SLOT.longValue());
     when(signer.createRandaoReveal(compute_epoch_at_slot(SLOT), fork))
         .thenReturn(completedFuture(randaoReveal));
-    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal))
+    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal, Optional.of(graffiti)))
         .thenReturn(completedFuture(Optional.of(unsignedBlock)));
     when(signer.signBlock(unsignedBlock, fork)).thenReturn(completedFuture(blockSignature));
 
-    assertThat(duty.performDuty()).isCompleted();
+    performAndReportDuty();
 
     verify(validatorApiChannel)
         .sendSignedBlock(new SignedBeaconBlock(unsignedBlock, blockSignature));
+    verify(validatorLogger)
+        .dutyCompleted(duty.getProducedType(), SLOT, 1, Set.of(unsignedBlock.hash_tree_root()));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -87,7 +103,7 @@ class BlockProductionDutyTest {
     final BLSSignature randaoReveal = dataStructureUtil.randomSignature();
     when(signer.createRandaoReveal(compute_epoch_at_slot(SLOT), fork))
         .thenReturn(completedFuture(randaoReveal));
-    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal))
+    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal, Optional.of(graffiti)))
         .thenReturn(failedFuture(error));
 
     assertDutyFails(error);
@@ -98,10 +114,14 @@ class BlockProductionDutyTest {
     final BLSSignature randaoReveal = dataStructureUtil.randomSignature();
     when(signer.createRandaoReveal(compute_epoch_at_slot(SLOT), fork))
         .thenReturn(completedFuture(randaoReveal));
-    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal))
+    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal, Optional.of(graffiti)))
         .thenReturn(completedFuture(Optional.empty()));
 
-    assertThat(duty.performDuty()).isCompletedExceptionally();
+    performAndReportDuty();
+
+    verify(validatorLogger)
+        .dutyFailed(eq(duty.getProducedType()), eq(SLOT), any(IllegalStateException.class));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -111,7 +131,7 @@ class BlockProductionDutyTest {
     final BeaconBlock unsignedBlock = dataStructureUtil.randomBeaconBlock(SLOT.longValue());
     when(signer.createRandaoReveal(compute_epoch_at_slot(SLOT), fork))
         .thenReturn(completedFuture(randaoReveal));
-    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal))
+    when(validatorApiChannel.createUnsignedBlock(SLOT, randaoReveal, Optional.of(graffiti)))
         .thenReturn(completedFuture(Optional.of(unsignedBlock)));
     when(signer.signBlock(unsignedBlock, fork)).thenReturn(failedFuture(error));
 
@@ -119,8 +139,14 @@ class BlockProductionDutyTest {
   }
 
   public void assertDutyFails(final RuntimeException error) {
-    final SafeFuture<?> result = duty.performDuty();
-    assertThat(result).isCompletedExceptionally();
-    assertThatThrownBy(result::join).hasRootCause(error);
+    performAndReportDuty();
+    verify(validatorLogger).dutyFailed(duty.getProducedType(), SLOT, error);
+    verifyNoMoreInteractions(validatorLogger);
+  }
+
+  private void performAndReportDuty() {
+    final SafeFuture<DutyResult> result = duty.performDuty();
+    assertThat(result).isCompleted();
+    result.join().report(duty.getProducedType(), SLOT, validatorLogger);
   }
 }

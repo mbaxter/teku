@@ -14,13 +14,15 @@
 package tech.pegasys.teku.pow;
 
 import com.google.common.primitives.UnsignedLong;
-import io.reactivex.Flowable;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.Request;
+import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthBlock;
 import org.web3j.protocol.core.methods.response.EthCall;
@@ -34,67 +36,70 @@ public class Web3jEth1Provider implements Eth1Provider {
   private final Web3j web3j;
   private final AsyncRunner asyncRunner;
 
-  public Web3jEth1Provider(Web3j web3j, AsyncRunner asyncRunner) {
+  public Web3jEth1Provider(final Web3j web3j, final AsyncRunner asyncRunner) {
     this.web3j = web3j;
     this.asyncRunner = asyncRunner;
   }
 
   @Override
-  public Flowable<EthBlock.Block> getLatestBlockFlowable() {
-    LOG.trace("Subscribing to new block events");
-    return web3j.blockFlowable(false).map(EthBlock::getBlock);
-  }
-
-  @Override
-  public SafeFuture<EthBlock.Block> getEth1BlockFuture(UnsignedLong blockNumber) {
+  public SafeFuture<EthBlock.Block> getEth1Block(final UnsignedLong blockNumber) {
     LOG.trace("Getting eth1 block {}", blockNumber);
     DefaultBlockParameter blockParameter =
         DefaultBlockParameter.valueOf(blockNumber.bigIntegerValue());
-    return getEth1BlockFuture(blockParameter);
+    return getEth1Block(blockParameter);
   }
 
   @Override
-  public SafeFuture<EthBlock.Block> getEth1BlockFuture(String blockHash) {
+  public SafeFuture<EthBlock.Block> getEth1Block(final String blockHash) {
     LOG.trace("Getting eth1 block {}", blockHash);
-    return SafeFuture.of(web3j.ethGetBlockByHash(blockHash, false).sendAsync())
-        .thenApply(EthBlock::getBlock);
+    return sendAsync(web3j.ethGetBlockByHash(blockHash, false)).thenApply(EthBlock::getBlock);
   }
 
   @Override
-  public SafeFuture<EthBlock.Block> getGuaranteedEth1BlockFuture(String blockHash) {
-    return getEth1BlockFuture(blockHash)
+  public SafeFuture<EthBlock.Block> getGuaranteedEth1Block(final String blockHash) {
+    return getEth1Block(blockHash)
         .exceptionallyCompose(
             (err) -> {
-              LOG.warn("Retrying Eth1 request for block: {}", blockHash, err);
+              LOG.debug("Retrying Eth1 request for block: {}", blockHash, err);
               return asyncRunner
                   .getDelayedFuture(
                       Constants.ETH1_INDIVIDUAL_BLOCK_RETRY_TIMEOUT, TimeUnit.MILLISECONDS)
-                  .thenCompose(__ -> getGuaranteedEth1BlockFuture(blockHash));
+                  .thenCompose(__ -> getGuaranteedEth1Block(blockHash));
             });
   }
 
   @Override
-  public SafeFuture<EthBlock.Block> getGuaranteedEth1BlockFuture(UnsignedLong blockNumber) {
-    return getEth1BlockFuture(blockNumber)
+  public SafeFuture<EthBlock.Block> getGuaranteedEth1Block(final UnsignedLong blockNumber) {
+    return getEth1Block(blockNumber)
         .exceptionallyCompose(
             (err) -> {
-              LOG.warn("Retrying Eth1 request for block: {}", blockNumber, err);
+              LOG.debug("Retrying Eth1 request for block: {}", blockNumber, err);
               return asyncRunner
                   .getDelayedFuture(
                       Constants.ETH1_INDIVIDUAL_BLOCK_RETRY_TIMEOUT, TimeUnit.MILLISECONDS)
-                  .thenCompose(__ -> getGuaranteedEth1BlockFuture(blockNumber));
+                  .thenCompose(__ -> getGuaranteedEth1Block(blockNumber));
             });
   }
 
-  private SafeFuture<EthBlock.Block> getEth1BlockFuture(DefaultBlockParameter blockParameter) {
-    return SafeFuture.of(web3j.ethGetBlockByNumber(blockParameter, false).sendAsync())
+  private SafeFuture<EthBlock.Block> getEth1Block(final DefaultBlockParameter blockParameter) {
+    return sendAsync(web3j.ethGetBlockByNumber(blockParameter, false))
         .thenApply(EthBlock::getBlock);
   }
 
+  @SuppressWarnings("rawtypes")
+  private <S, T extends Response> SafeFuture<T> sendAsync(final Request<S, T> request) {
+    try {
+      return SafeFuture.of(request.sendAsync());
+    } catch (RejectedExecutionException ex) {
+      LOG.debug("shutting down, ignoring error", ex);
+      return new SafeFuture<>();
+    }
+  }
+
   @Override
-  public SafeFuture<EthBlock.Block> getLatestEth1BlockFuture() {
+  public SafeFuture<EthBlock.Block> getLatestEth1Block() {
     DefaultBlockParameter blockParameter = DefaultBlockParameterName.LATEST;
-    return getEth1BlockFuture(blockParameter);
+    return getEth1Block(blockParameter);
   }
 
   @Override

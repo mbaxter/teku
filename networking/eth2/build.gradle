@@ -9,7 +9,9 @@ dependencies {
   implementation project(':logging')
   implementation project(':ssz')
   implementation project(':storage')
+  implementation project(':storage:api')
   implementation project(':util')
+  implementation project(':services:serviceutils')
 
   implementation 'io.libp2p:jvm-libp2p-minimal'
   implementation 'io.vertx:vertx-core'
@@ -18,12 +20,13 @@ dependencies {
   implementation 'org.apache.tuweni:tuweni-rlpx'
   implementation 'org.apache.tuweni:tuweni-ssz'
   implementation 'org.apache.tuweni:tuweni-units'
-  implementation 'org.hyperledger.besu:plugin-api'
   implementation 'org.xerial.snappy:snappy-java'
 
+  testImplementation testFixtures(project(':data:metrics'))
   testImplementation testFixtures(project(':ethereum:core'))
   testImplementation testFixtures(project(':ethereum:datastructures'))
   testImplementation testFixtures(project(':ethereum:statetransition'))
+  testImplementation testFixtures(project(':networking:p2p'))
   testImplementation testFixtures(project(':util'))
   testImplementation testFixtures(project(':storage'))
 
@@ -42,6 +45,7 @@ dependencies {
   testFixturesImplementation testFixtures(project(':util'))
   testFixturesImplementation testFixtures(project(':events'))
   testFixturesImplementation testFixtures(project(':storage'))
+  testFixturesImplementation project(':services:serviceutils')
 
   testFixturesImplementation 'io.libp2p:jvm-libp2p-minimal'
   testFixturesImplementation 'org.mockito:mockito-core'

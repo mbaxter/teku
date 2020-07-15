@@ -14,7 +14,8 @@
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
 import java.util.Optional;
-import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
@@ -33,16 +34,19 @@ public class StatusMessageFactory {
       // We don't have chainhead information, so we can't generate an accurate status message
       return Optional.empty();
     }
-    final ForkInfo forkInfo = recentChainData.getCurrentForkInfo().orElseThrow();
-    final Checkpoint finalizedCheckpoint = recentChainData.getStore().getFinalizedCheckpoint();
-    final SignedBeaconBlock chainHead = recentChainData.getBestBlock().orElseThrow();
+
+    final BeaconBlockAndState bestBlockAndState =
+        recentChainData.getBestBlockAndState().orElseThrow();
+    final ForkInfo forkInfo = recentChainData.getForkInfoAtCurrentTime().orElseThrow();
+    final Checkpoint finalizedCheckpoint = bestBlockAndState.getState().getFinalized_checkpoint();
+    final BeaconBlock chainHead = bestBlockAndState.getBlock();
 
     return Optional.of(
         new StatusMessage(
             forkInfo.getForkDigest(),
             finalizedCheckpoint.getRoot(),
             finalizedCheckpoint.getEpoch(),
-            chainHead.getRoot(),
+            chainHead.hash_tree_root(),
             chainHead.getSlot()));
   }
 }

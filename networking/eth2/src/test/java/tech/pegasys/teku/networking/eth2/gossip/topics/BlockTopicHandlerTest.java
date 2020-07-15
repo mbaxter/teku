@@ -17,18 +17,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.google.common.eventbus.EventBus;
 import com.google.common.primitives.UnsignedLong;
+import io.libp2p.core.pubsub.ValidationResult;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.core.StateTransition;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.events.GossipedBlockEvent;
 import tech.pegasys.teku.networking.eth2.gossip.topics.validation.BlockValidator;
+import tech.pegasys.teku.ssz.SSZTypes.Bytes4;
 import tech.pegasys.teku.statetransition.BeaconChainUtil;
 import tech.pegasys.teku.storage.client.MemoryOnlyRecentChainData;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -41,7 +45,8 @@ public class BlockTopicHandlerTest {
   private final BlockValidator blockValidator =
       new BlockValidator(recentChainData, new StateTransition());
   private final BeaconChainUtil beaconChainUtil = BeaconChainUtil.create(2, recentChainData);
-  private final BlockTopicHandler topicHandler =
+
+  private BlockTopicHandler topicHandler =
       new BlockTopicHandler(
           gossipEncoding, dataStructureUtil.randomForkInfo(), blockValidator, eventBus);
 
@@ -57,8 +62,8 @@ public class BlockTopicHandlerTest {
     Bytes serialized = gossipEncoding.encode(block);
     beaconChainUtil.setSlot(nextSlot);
 
-    final boolean result = topicHandler.handleMessage(serialized);
-    assertThat(result).isEqualTo(true);
+    final ValidationResult result = topicHandler.handleMessage(serialized);
+    assertThat(result).isEqualTo(ValidationResult.Valid);
     verify(eventBus).post(new GossipedBlockEvent(block));
   }
 
@@ -69,8 +74,8 @@ public class BlockTopicHandlerTest {
     Bytes serialized = gossipEncoding.encode(block);
     beaconChainUtil.setSlot(recentChainData.getBestSlot());
 
-    final boolean result = topicHandler.handleMessage(serialized);
-    assertThat(result).isEqualTo(false);
+    final ValidationResult result = topicHandler.handleMessage(serialized);
+    assertThat(result).isEqualTo(ValidationResult.Ignore);
     verify(eventBus).post(new GossipedBlockEvent(block));
   }
 
@@ -79,8 +84,8 @@ public class BlockTopicHandlerTest {
     SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(1);
     Bytes serialized = gossipEncoding.encode(block);
 
-    final boolean result = topicHandler.handleMessage(serialized);
-    assertThat(result).isEqualTo(false);
+    final ValidationResult result = topicHandler.handleMessage(serialized);
+    assertThat(result).isEqualTo(ValidationResult.Ignore);
     verify(eventBus).post(new GossipedBlockEvent(block));
   }
 
@@ -88,8 +93,8 @@ public class BlockTopicHandlerTest {
   public void handleMessage_invalidBlock_invalidSSZ() {
     Bytes serialized = Bytes.fromHexString("0x1234");
 
-    final boolean result = topicHandler.handleMessage(serialized);
-    assertThat(result).isEqualTo(false);
+    final ValidationResult result = topicHandler.handleMessage(serialized);
+    assertThat(result).isEqualTo(ValidationResult.Invalid);
   }
 
   @Test
@@ -99,8 +104,18 @@ public class BlockTopicHandlerTest {
     Bytes serialized = gossipEncoding.encode(block);
     beaconChainUtil.setSlot(nextSlot);
 
-    final boolean result = topicHandler.handleMessage(serialized);
-    assertThat(result).isEqualTo(false);
+    final ValidationResult result = topicHandler.handleMessage(serialized);
+    assertThat(result).isEqualTo(ValidationResult.Invalid);
     verify(eventBus, never()).post(new GossipedBlockEvent(block));
+  }
+
+  @Test
+  public void returnProperTopicName() {
+    final Bytes4 forkDigest = Bytes4.fromHexString("0x11223344");
+    final ForkInfo forkInfo = mock(ForkInfo.class);
+    when(forkInfo.getForkDigest()).thenReturn(forkDigest);
+    final BlockTopicHandler topicHandler =
+        new BlockTopicHandler(gossipEncoding, forkInfo, blockValidator, eventBus);
+    assertThat(topicHandler.getTopic()).isEqualTo("/eth2/11223344/beacon_block/ssz_snappy");
   }
 }

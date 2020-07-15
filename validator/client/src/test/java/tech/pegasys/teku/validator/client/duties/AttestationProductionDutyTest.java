@@ -17,16 +17,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.util.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.util.async.SafeFuture.failedFuture;
 
 import com.google.common.primitives.UnsignedLong;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -34,6 +37,7 @@ import tech.pegasys.teku.core.signatures.Signer;
 import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
+import tech.pegasys.teku.logging.ValidatorLogger;
 import tech.pegasys.teku.ssz.SSZTypes.Bitlist;
 import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.config.Constants;
@@ -49,6 +53,7 @@ class AttestationProductionDutyTest {
   private final ForkInfo fork = dataStructureUtil.randomForkInfo();
   private final ForkProvider forkProvider = mock(ForkProvider.class);
   private final ValidatorApiChannel validatorApiChannel = mock(ValidatorApiChannel.class);
+  private final ValidatorLogger validatorLogger = mock(ValidatorLogger.class);
 
   private final AttestationProductionDuty duty =
       new AttestationProductionDuty(SLOT, forkProvider, validatorApiChannel);
@@ -59,10 +64,15 @@ class AttestationProductionDutyTest {
   }
 
   @Test
-  public void shouldNotProduceAnyAttestationsWhenNoValidatorsAdded() {
-    assertThat(duty.performDuty()).isCompleted();
+  public void shouldReportCorrectProducedType() {
+    assertThat(duty.getProducedType()).isEqualTo("attestation");
+  }
 
-    verifyNoInteractions(validatorApiChannel);
+  @Test
+  public void shouldNotProduceAnyAttestationsWhenNoValidatorsAdded() {
+    performAndReportDuty();
+
+    verifyNoInteractions(validatorApiChannel, validatorLogger);
   }
 
   @Test
@@ -71,11 +81,14 @@ class AttestationProductionDutyTest {
     when(validatorApiChannel.createUnsignedAttestation(SLOT, 0))
         .thenReturn(completedFuture(Optional.empty()));
 
-    final SafeFuture<Optional<Attestation>> attestationFuture = duty.addValidator(validator, 0, 5);
-    final SafeFuture<?> result = duty.performDuty();
+    final SafeFuture<Optional<Attestation>> attestationFuture =
+        duty.addValidator(validator, 0, 5, 10);
+    performAndReportDuty();
 
-    assertThat(result).isCompletedExceptionally();
     assertThat(attestationFuture).isCompletedWithValue(Optional.empty());
+    verify(validatorLogger)
+        .dutyFailed(eq(duty.getProducedType()), eq(SLOT), any(IllegalStateException.class));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -94,15 +107,25 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator2, validator2CommitteePosition, unsignedAttestation);
 
     final SafeFuture<Optional<Attestation>> attestationResult1 =
-        duty.addValidator(validator1, validator1CommitteeIndex, validator1CommitteePosition);
+        duty.addValidator(validator1, validator1CommitteeIndex, validator1CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult2 =
-        duty.addValidator(validator2, validator2CommitteeIndex, validator2CommitteePosition);
+        duty.addValidator(validator2, validator2CommitteeIndex, validator2CommitteePosition, 10);
 
-    assertThat(duty.performDuty()).isCompletedExceptionally();
+    performAndReportDuty();
+
     assertThat(attestationResult1).isCompletedWithValue(Optional.empty());
     assertThat(attestationResult2).isCompletedWithValue(Optional.of(unsignedAttestation));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation, Optional.of(10));
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            1,
+            Set.of(unsignedAttestation.getData().getBeacon_block_root()));
+    verify(validatorLogger)
+        .dutyFailed(eq(duty.getProducedType()), eq(SLOT), any(IllegalStateException.class));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -122,18 +145,26 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator2, validator2CommitteePosition, unsignedAttestation);
 
     final SafeFuture<Optional<Attestation>> attestationResult1 =
-        duty.addValidator(validator1, validator1CommitteeIndex, validator1CommitteePosition);
+        duty.addValidator(validator1, validator1CommitteeIndex, validator1CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult2 =
-        duty.addValidator(validator2, validator2CommitteeIndex, validator2CommitteePosition);
+        duty.addValidator(validator2, validator2CommitteeIndex, validator2CommitteePosition, 10);
 
-    final SafeFuture<?> result = duty.performDuty();
-    assertThat(result).isCompletedExceptionally();
-    assertThatThrownBy(result::join).hasRootCause(failure);
+    performAndReportDuty();
+
     assertThat(attestationResult1).isCompletedExceptionally();
     assertThatThrownBy(attestationResult1::join).hasRootCause(failure);
     assertThat(attestationResult2).isCompletedWithValue(Optional.of(unsignedAttestation));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation, Optional.of(10));
+
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            1,
+            Set.of(unsignedAttestation.getData().getBeacon_block_root()));
+    verify(validatorLogger).dutyFailed(duty.getProducedType(), SLOT, failure);
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -151,17 +182,24 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator2, validator2CommitteePosition, unsignedAttestation);
 
     final SafeFuture<Optional<Attestation>> attestationResult1 =
-        duty.addValidator(validator1, committeeIndex, validator1CommitteePosition);
+        duty.addValidator(validator1, committeeIndex, validator1CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult2 =
-        duty.addValidator(validator2, committeeIndex, validator2CommitteePosition);
+        duty.addValidator(validator2, committeeIndex, validator2CommitteePosition, 10);
 
-    final SafeFuture<?> result = duty.performDuty();
-    assertThat(result).isCompletedExceptionally();
-    assertThatThrownBy(result::join).hasRootCause(signingFailure);
+    performAndReportDuty();
     assertThat(attestationResult1).isCompletedWithValue(Optional.of(unsignedAttestation));
     assertThat(attestationResult2).isCompletedWithValue(Optional.of(unsignedAttestation));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation, Optional.of(10));
+
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            1,
+            Set.of(unsignedAttestation.getData().getBeacon_block_root()));
+    verify(validatorLogger).dutyFailed(duty.getProducedType(), SLOT, signingFailure);
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -175,11 +213,18 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator, committeePosition, unsignedAttestation);
 
     final SafeFuture<Optional<Attestation>> attestationResult =
-        duty.addValidator(validator, committeeIndex, committeePosition);
-    assertThat(duty.performDuty()).isCompleted();
+        duty.addValidator(validator, committeeIndex, committeePosition, 10);
+    performAndReportDuty();
     assertThat(attestationResult).isCompletedWithValue(Optional.of(unsignedAttestation));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation, Optional.of(10));
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            1,
+            Set.of(unsignedAttestation.getData().getBeacon_block_root()));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -201,22 +246,29 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator3, validator3CommitteePosition, unsignedAttestation);
 
     final SafeFuture<Optional<Attestation>> attestationResult1 =
-        duty.addValidator(validator1, committeeIndex, validator1CommitteePosition);
+        duty.addValidator(validator1, committeeIndex, validator1CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult2 =
-        duty.addValidator(validator2, committeeIndex, validator2CommitteePosition);
+        duty.addValidator(validator2, committeeIndex, validator2CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult3 =
-        duty.addValidator(validator3, committeeIndex, validator3CommitteePosition);
-    assertThat(duty.performDuty()).isCompleted();
+        duty.addValidator(validator3, committeeIndex, validator3CommitteePosition, 10);
+    performAndReportDuty();
     assertThat(attestationResult1).isCompletedWithValue(Optional.of(unsignedAttestation));
     assertThat(attestationResult2).isCompletedWithValue(Optional.of(unsignedAttestation));
     assertThat(attestationResult3).isCompletedWithValue(Optional.of(unsignedAttestation));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation1);
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation2);
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation3);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation1, Optional.of(10));
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation2, Optional.of(10));
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation3, Optional.of(10));
 
     // Should have only needed to create one unsigned attestation and reused it for each validator
     verify(validatorApiChannel, times(1)).createUnsignedAttestation(any(), anyInt());
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            3,
+            Set.of(unsignedAttestation.getData().getBeacon_block_root()));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   @Test
@@ -240,28 +292,37 @@ class AttestationProductionDutyTest {
         expectSignAttestation(validator3, validator3CommitteePosition, unsignedAttestation1);
 
     final SafeFuture<Optional<Attestation>> attestationResult1 =
-        duty.addValidator(validator1, committeeIndex1, validator1CommitteePosition);
+        duty.addValidator(validator1, committeeIndex1, validator1CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult2 =
-        duty.addValidator(validator2, committeeIndex2, validator2CommitteePosition);
+        duty.addValidator(validator2, committeeIndex2, validator2CommitteePosition, 10);
     final SafeFuture<Optional<Attestation>> attestationResult3 =
-        duty.addValidator(validator3, committeeIndex1, validator3CommitteePosition);
+        duty.addValidator(validator3, committeeIndex1, validator3CommitteePosition, 10);
 
-    assertThat(duty.performDuty()).isCompleted();
+    performAndReportDuty();
     assertThat(attestationResult1).isCompletedWithValue(Optional.of(unsignedAttestation1));
     assertThat(attestationResult2).isCompletedWithValue(Optional.of(unsignedAttestation2));
     assertThat(attestationResult3).isCompletedWithValue(Optional.of(unsignedAttestation1));
 
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation1);
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation2);
-    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation3);
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation1, Optional.of(10));
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation2, Optional.of(10));
+    verify(validatorApiChannel).sendSignedAttestation(expectedAttestation3, Optional.of(10));
 
     // Need to create an unsigned attestation for each committee
     verify(validatorApiChannel, times(2)).createUnsignedAttestation(any(), anyInt());
+    verify(validatorLogger)
+        .dutyCompleted(
+            duty.getProducedType(),
+            SLOT,
+            3,
+            Set.of(
+                unsignedAttestation1.getData().getBeacon_block_root(),
+                unsignedAttestation2.getData().getBeacon_block_root()));
+    verifyNoMoreInteractions(validatorLogger);
   }
 
   public Validator createValidator() {
     final Signer signer = mock(Signer.class);
-    return new Validator(dataStructureUtil.randomPublicKey(), signer);
+    return new Validator(dataStructureUtil.randomPublicKey(), signer, Optional.empty());
   }
 
   public Attestation expectSignAttestation(
@@ -293,5 +354,11 @@ class AttestationProductionDutyTest {
     final Bitlist expectedAggregationBits = new Bitlist(unsignedAttestation.getAggregation_bits());
     expectedAggregationBits.setBit(committeePosition);
     return new Attestation(expectedAggregationBits, unsignedAttestation.getData(), signature);
+  }
+
+  private void performAndReportDuty() {
+    final SafeFuture<DutyResult> result = duty.performDuty();
+    assertThat(result).isCompleted();
+    result.join().report(duty.getProducedType(), SLOT, validatorLogger);
   }
 }

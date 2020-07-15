@@ -24,7 +24,7 @@ Xinterop-number-of-validators: 64
 Xinterop-enabled: True
 
 # validator
-#validators-key-file: "path/to/keys.yaml"
+#validators-unencrypted-key-file: "path/to/keys.yaml"
 
 # deposit
 eth1-deposit-contract-address: "0x77f7bED277449F51505a4C54550B074030d989bC"
@@ -45,6 +45,7 @@ metrics-enabled: False
 metrics-port: 8008
 metrics-interface: "127.0.0.1"
 metrics-categories: ["BEACON", "LIBP2P", "NETWORK", "EVENTBUS", "JVM", "PROCESS"]
+#metrics-host-allowlist: ["localhost", "127.0.0.1"]
 
 # database
 #data-path: "."
@@ -55,3 +56,4 @@ rest-api-port: 5051
 rest-api-docs-enabled: True
 rest-api-enabled: True
 rest-api-interface: "127.0.0.1"
+#rest-api-host-allowlist: ["localhost", "127.0.0.1"]

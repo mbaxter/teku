@@ -3,10 +3,11 @@ dependencies {
   implementation project(':ssz')
   implementation project(':util')
   implementation project(':events')
+  implementation project(':storage:api')
+  implementation project(':logging')
 
   api 'org.web3j:core'
   
-  implementation 'com.googlecode.json-simple:json-simple'
   implementation 'com.google.code.gson:gson'
   implementation 'org.apache.tuweni:tuweni-crypto'
   implementation 'org.apache.tuweni:tuweni-units'

@@ -15,15 +15,12 @@ package tech.pegasys.teku.pow;
 
 import static tech.pegasys.teku.pow.MinimumGenesisTimeBlockFinder.calculateCandidateGenesisTimestamp;
 import static tech.pegasys.teku.pow.MinimumGenesisTimeBlockFinder.notifyMinGenesisTimeBlockReached;
-import static tech.pegasys.teku.util.config.Constants.ETH1_FOLLOW_DISTANCE;
 
 import com.google.common.primitives.UnsignedLong;
-import io.reactivex.disposables.Disposable;
 import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.web3j.protocol.core.methods.response.EthBlock;
 import tech.pegasys.teku.pow.api.Eth1EventsChannel;
 import tech.pegasys.teku.util.async.AsyncRunner;
 import tech.pegasys.teku.util.async.SafeFuture;
@@ -37,8 +34,9 @@ public class DepositProcessingController {
   private final Eth1EventsChannel eth1EventsChannel;
   private final AsyncRunner asyncRunner;
   private final DepositFetcher depositFetcher;
+  private final Eth1HeadTracker headTracker;
 
-  private Disposable newBlockSubscription;
+  private long newBlockSubscription;
   private boolean active = false;
 
   // BlockByBlock mode is used to request deposit events and block information for each block
@@ -47,15 +45,21 @@ public class DepositProcessingController {
   private BigInteger latestSuccessfullyQueriedBlock = BigInteger.ZERO;
   private BigInteger latestCanonicalBlockNumber = BigInteger.ZERO;
 
+  private final Eth1BlockFetcher eth1BlockFetcher;
+
   public DepositProcessingController(
       Eth1Provider eth1Provider,
       Eth1EventsChannel eth1EventsChannel,
       AsyncRunner asyncRunner,
-      DepositFetcher depositFetcher) {
+      DepositFetcher depositFetcher,
+      Eth1BlockFetcher eth1BlockFetcher,
+      Eth1HeadTracker headTracker) {
     this.eth1Provider = eth1Provider;
     this.eth1EventsChannel = eth1EventsChannel;
     this.asyncRunner = asyncRunner;
     this.depositFetcher = depositFetcher;
+    this.eth1BlockFetcher = eth1BlockFetcher;
+    this.headTracker = headTracker;
   }
 
   public synchronized void switchToBlockByBlockMode() {
@@ -67,46 +71,21 @@ public class DepositProcessingController {
   public synchronized void startSubscription(BigInteger subscriptionStartBlock) {
     LOG.debug("Starting subscription at block {}", subscriptionStartBlock);
     latestSuccessfullyQueriedBlock = subscriptionStartBlock.subtract(BigInteger.ONE);
-    newBlockSubscription =
-        eth1Provider
-            .getLatestBlockFlowable()
-            .map(EthBlock.Block::getNumber)
-            .map(number -> number.subtract(ETH1_FOLLOW_DISTANCE.bigIntegerValue()))
-            .subscribe(this::onNewCanonicalBlockNumber, this::onSubscriptionFailed);
+    newBlockSubscription = headTracker.subscribe(this::onNewCanonicalBlockNumber);
   }
 
   public void stopIfSubscribed() {
-    if (newBlockSubscription != null) {
-      newBlockSubscription.dispose();
-    }
+    headTracker.unsubscribe(newBlockSubscription);
   }
 
-  // Inclusive
-  public synchronized SafeFuture<Void> fetchDepositsFromGenesisTo(BigInteger toBlockNumber) {
-    return depositFetcher.fetchDepositsInRange(BigInteger.ZERO, toBlockNumber);
+  // inclusive
+  public synchronized SafeFuture<Void> fetchDepositsInRange(
+      final BigInteger fromBlockNumber, final BigInteger toBlockNumber) {
+    return depositFetcher.fetchDepositsInRange(fromBlockNumber, toBlockNumber);
   }
 
-  private synchronized void onSubscriptionFailed(Throwable err) {
-    Disposable subscription = newBlockSubscription;
-    if (subscription != null) {
-      subscription.dispose();
-    }
-    LOG.warn("New block subscription failed, retrying.", err);
-    asyncRunner
-        .getDelayedFuture(Constants.ETH1_SUBSCRIPTION_RETRY_TIMEOUT, TimeUnit.SECONDS)
-        .finish(
-            () -> startSubscription(latestSuccessfullyQueriedBlock),
-            (error) ->
-                LOG.warn(
-                    "Unable to subscribe to the Eth1Node. Node won't have access to new deposits after genesis.",
-                    error));
-  }
-
-  private synchronized void onNewCanonicalBlockNumber(BigInteger latestCanonicalBlockNumber) {
-    if (latestCanonicalBlockNumber.compareTo(this.latestCanonicalBlockNumber) <= 0) {
-      return;
-    }
-    this.latestCanonicalBlockNumber = latestCanonicalBlockNumber;
+  private synchronized void onNewCanonicalBlockNumber(UnsignedLong newCanonicalBlockNumber) {
+    this.latestCanonicalBlockNumber = newCanonicalBlockNumber.bigIntegerValue();
     fetchLatestSubscriptionDeposits();
   }
 
@@ -152,7 +131,7 @@ public class DepositProcessingController {
     depositFetcher
         .fetchDepositsInRange(nextBlockNumber, nextBlockNumber)
         .thenCompose(
-            __ -> eth1Provider.getGuaranteedEth1BlockFuture(UnsignedLong.valueOf(nextBlockNumber)))
+            __ -> eth1Provider.getGuaranteedEth1Block(UnsignedLong.valueOf(nextBlockNumber)))
         .thenAccept(
             block -> {
               final BigInteger blockNumber = block.getNumber();
@@ -177,9 +156,11 @@ public class DepositProcessingController {
   private synchronized void onSubscriptionDepositRequestSuccessful(BigInteger requestToBlock) {
     active = false;
     latestSuccessfullyQueriedBlock = requestToBlock;
-
     if (latestCanonicalBlockNumber.compareTo(latestSuccessfullyQueriedBlock) > 0) {
       fetchLatestSubscriptionDeposits();
+    } else {
+      // We've caught up with deposits all the way up to the follow distance
+      eth1BlockFetcher.onInSync(UnsignedLong.valueOf(latestCanonicalBlockNumber));
     }
   }
 

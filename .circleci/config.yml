@@ -42,6 +42,10 @@ executors:
       docker_layer_caching: true
     working_directory: ~/project
 
+  node_executor:
+    docker:
+      - image: circleci/node:14-buster
+
 commands:
   prepare:
     description: "Prepare"
@@ -81,6 +85,7 @@ commands:
             done
       - store_test_results:
           path: build/test-results
+
   capture_test_artifacts:
     description: "Capture test artifacts"
     steps:
@@ -107,7 +112,7 @@ jobs:
       - run:
           name: Assemble
           command: |
-            ./gradlew --no-daemon --parallel clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compileReferenceTestJava compileCompatibilityTestJava assemble
+            ./gradlew --no-daemon --parallel clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compileCompatibilityTestJava assemble
       - save_cache:
           name: Caching gradle dependencies
           key: deps-{{ checksum "build.gradle" }}-{{ .Branch }}-{{ .Revision }}
@@ -118,6 +123,11 @@ jobs:
           root: ~/project
           paths:
             - ./
+      - store_artifacts:
+          name: Distribution artifacts
+          path:  build/distributions
+          destination: distributions
+          when: always
 
   spotless:
     executor: small_executor
@@ -129,6 +139,7 @@ jobs:
             ./gradlew --no-daemon --parallel spotlessCheck
 
   unitTests:
+    parallelism: 2
     executor: medium_plus_executor
     steps:
       - prepare
@@ -138,7 +149,15 @@ jobs:
           name: UnitTests
           no_output_timeout: 20m
           command: |
-            ./gradlew --no-daemon --parallel test
+            CLASSNAMES=$(circleci tests glob "**/src/test/java/**/*.java" \
+              | sed 's@.*/src/test/java/@@' \
+              | sed 's@/@.@g' \
+              | sed 's/.\{5\}$//' \
+              | circleci tests split --split-by=timings --timings-type=classname)
+            # Format the arguments to "./gradlew test"
+            GRADLE_ARGS=$(echo $CLASSNAMES | awk '{for (i=1; i<=NF; i++) print "--tests",$i}')
+            echo "Prepared arguments for Gradle: $GRADLE_ARGS"
+            ./gradlew --no-daemon --parallel test $GRADLE_ARGS
       - capture_test_results
 
   integrationTests:
@@ -155,7 +174,7 @@ jobs:
       - capture_test_results
 
   acceptanceTests:
-    parallelism: 1
+    parallelism: 2
     executor: machine_executor
     steps:
       - prepare
@@ -196,10 +215,14 @@ jobs:
               ./gradlew --no-daemon expandRefTests
             fi
       - run:
+          name: CompileReferenceTests
+          command: |
+            ./gradlew --no-daemon --parallel compileReferenceTestJava
+      - run:
           name: ReferenceTests
           command: |
-            CLASSNAMES=$(circleci tests glob "**/src/referenceTest/java/**/*.java" \
-              | sed 's@.*/src/referenceTest/java/@@' \
+            CLASSNAMES=$(circleci tests glob "**/src/referenceTest/generated/**/*Test.java" \
+              | sed 's@.*/src/referenceTest/generated/@@' \
               | sed 's@/@.@g' \
               | sed 's/.\{5\}$//' \
               | circleci tests split --split-by=timings --timings-type=classname)
@@ -267,6 +290,116 @@ jobs:
             docker login --username "${DOCKER_USER}" --password "${DOCKER_PASSWORD}"
             ./gradlew --no-daemon --parallel "-Pbranch=${CIRCLE_BRANCH}" dockerUpload
 
+  extractAPISpec:
+    executor: medium_executor
+    steps:
+      - prepare
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Build runnable Teku binaries
+          command: |
+            ./gradlew --no-daemon --parallel installDist
+      - run:
+          name: Extract OpenAPI JSON
+          command: |
+            build/install/teku/bin/teku --network=mainnet --Xinterop-enabled=true --rest-api-enabled=true --rest-api-docs-enabled=true 2>&1 > teku_output.log &
+            TEKU_PID=$!
+
+            EXIT_CODE=0
+            wget --timeout=30 --retry-connrefused --output-document=./docs/openapi.json http://localhost:5051/swagger-docs
+            if [ $? != 0 ]; then
+              rm openapi.json
+              EXIT_CODE=1
+            fi
+
+            kill $TEKU_PID
+            exit $EXIT_CODE
+      - store_artifacts:
+          path: ./docs/openapi.json
+      - store_artifacts:
+          path: teku_output.log
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - ./docs/openapi.json
+
+  publishAPIDoc:
+    executor: node_executor
+    steps:
+      # This job requires that we checkout current branch first to have all the repos.
+      # it will not be used directly as we have the saved workspace
+      # but will enable to checkout gh-pages branch.
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: checkout gh pages branch and copy files from workspace
+          command: |
+            # publishing happens by pushing files to gh-pages branch
+            # retrieve branch to publish to from Circle CI env vars and fallback on the real gh-pages
+            # if no var for a test or alternative branch defined.
+            [ -n "$GH_PAGES_BRANCH_OVERRIDE" ] && readonly BRANCH="$GH_PAGES_BRANCH_OVERRIDE" || readonly BRANCH='gh-pages'
+
+            # switch to the publishing branch
+            git checkout "$BRANCH"
+
+            # copy the content of the docs folder built on the previous job and attached
+            # using workspace on temp location
+            # cp with T option to override existing content, specially usefull for latest
+            cp -aT /tmp/workspace/docs/. .
+
+            # add a readme to make sure devs understand that this publishing branch is generated
+            # by CI (use template readme), mv replaces the current readme that is only for source dir
+            mv TARGET_README.md README.md
+      - restore_cache:
+          keys:
+            - node-cache-{{ checksum "package-lock.json" }}
+      - run:
+          name: Install dependencies
+          command: |
+            npm ci
+      - save_cache:
+          paths:
+            - ~/.npm
+          key: node-cache-{{ checksum "package-lock.json" }}
+      - run:
+          name: Generate API doc site files
+          command: |
+            npm run generate-versions -- --spec=openapi.json --tag=${CIRCLE_TAG}
+      - run:
+          name: Clean gh-pages branch
+          command: |
+            # remove files used to build the doc version but it's not usefull to have them in
+            # the final gh-pages branch
+            rm openapi.json
+            rm package.json
+            rm package-lock.json
+            rm generate-versions.js
+      - add_ssh_keys:
+          fingerprints:
+            - '45:36:58:67:43:15:c6:5f:2c:58:ec:7f:71:e2:e6:ef'
+      - run:
+          name: Set Git user params
+          command: |
+            git config --global user.name $CIRCLE_USERNAME
+            git config --global user.email "${CIRCLE_USERNAME}@users.noreply.github.com"
+      - deploy:
+          name: Commit and push docs changes
+          command: |
+            # add all generated and copied content to git
+            git add .
+
+            # commit with infos on the triggering task and branch
+            # use [skip ci] to prevent CI from runnning on this branch as no CI is configured
+            git commit -m "Automated REST API documentation update" \
+                       -m "[ci skip] Circle CI build ${CIRCLE_BUILD_NUM}, see ${CIRCLE_BUILD_URL}" \
+                       -m "Branch: ${CIRCLE_BRANCH}, commit: ${CIRCLE_SHA1}, tag:${CIRCLE_TAG-none}"
+
+            # push changes to the Github Pages publishing branch on origin repos
+            git push --set-upstream origin $BRANCH
+            git push origin
+
 workflows:
   version: 2
   circleci:
@@ -292,32 +425,53 @@ workflows:
       - docker:
           requires:
             - assemble
-            - unitTests
             - spotless
+      - extractAPISpec:
+          requires:
+            - assemble
       - publish:
           filters:
             branches:
               only:
                 - master
                 - /^release-.*/
+                - /^.*-integration$/
           requires:
             - unitTests
             - integrationTests
             - acceptanceTests
             - referenceTests
             - docker
+            - extractAPISpec
       - publishDocker:
           filters:
             branches:
               only:
                 - master
                 - /^release-.*/
+                - /^.*-integration$/
           requires:
             - unitTests
             - integrationTests
             - acceptanceTests
             - referenceTests
             - docker
+            - extractAPISpec
+      - publishAPIDoc:
+          filters:
+            branches:
+              only:
+                - master
+            tags: # stable doc is published only on tags to prevent confusion on the doc site.
+              only: /.*/
+          requires:
+            - unitTests
+            - integrationTests
+            - acceptanceTests
+            - referenceTests
+            - docker
+            - extractAPISpec
+
 #  nightly:
 #    triggers:
 #      - schedule:

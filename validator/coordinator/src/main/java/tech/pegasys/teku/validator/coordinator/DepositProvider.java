@@ -13,7 +13,10 @@
 
 package tech.pegasys.teku.validator.coordinator;
 
+import static com.google.common.primitives.UnsignedLong.ONE;
 import static java.lang.StrictMath.toIntExact;
+import static tech.pegasys.teku.core.BlockProcessorUtil.getVoteCount;
+import static tech.pegasys.teku.core.BlockProcessorUtil.isEnoughVotesToUpdateEth1Data;
 import static tech.pegasys.teku.util.config.Constants.DEPOSIT_CONTRACT_TREE_DEPTH;
 import static tech.pegasys.teku.util.config.Constants.MAX_DEPOSITS;
 
@@ -24,6 +27,8 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.datastructures.operations.Deposit;
 import tech.pegasys.teku.datastructures.operations.DepositWithIndex;
 import tech.pegasys.teku.datastructures.state.BeaconState;
@@ -43,29 +48,35 @@ public class DepositProvider implements Eth1EventsChannel, FinalizedCheckpointCh
   private static final Logger LOG = LogManager.getLogger();
 
   private final RecentChainData recentChainData;
+  private final Eth1DataCache eth1DataCache;
   private final MerkleTree depositMerkleTree = new OptimizedMerkleTree(DEPOSIT_CONTRACT_TREE_DEPTH);
 
-  private NavigableMap<UnsignedLong, DepositWithIndex> depositNavigableMap = new TreeMap<>();
+  private final NavigableMap<UnsignedLong, DepositWithIndex> depositNavigableMap = new TreeMap<>();
 
-  public DepositProvider(RecentChainData recentChainData) {
+  public DepositProvider(RecentChainData recentChainData, final Eth1DataCache eth1DataCache) {
     this.recentChainData = recentChainData;
+    this.eth1DataCache = eth1DataCache;
   }
 
   @Override
-  public void onDepositsFromBlock(DepositsFromBlockEvent event) {
+  public synchronized void onDepositsFromBlock(DepositsFromBlockEvent event) {
     event.getDeposits().stream()
         .map(DepositUtil::convertDepositEventToOperationDeposit)
         .forEach(
             deposit -> {
-              synchronized (DepositProvider.this) {
-                if (!recentChainData.isPreGenesis()) {
-                  LOG.debug("About to process deposit: {}", deposit.getIndex());
-                }
-
-                depositNavigableMap.put(deposit.getIndex(), deposit);
-                depositMerkleTree.add(deposit.getData().hash_tree_root());
+              if (!recentChainData.isPreGenesis()) {
+                LOG.debug("About to process deposit: {}", deposit.getIndex());
               }
+
+              depositNavigableMap.put(deposit.getIndex(), deposit);
+              depositMerkleTree.add(deposit.getData().hash_tree_root());
             });
+    eth1DataCache.onBlockWithDeposit(
+        event.getBlockTimestamp(),
+        new Eth1Data(
+            depositMerkleTree.getRoot(),
+            UnsignedLong.valueOf(depositMerkleTree.getNumberOfLeaves()),
+            event.getBlockHash()));
   }
 
   @Override
@@ -76,18 +87,33 @@ public class DepositProvider implements Eth1EventsChannel, FinalizedCheckpointCh
             .orElseThrow(
                 () -> new IllegalArgumentException("Finalized Checkpoint state can not be found."));
 
-    depositNavigableMap.headMap(finalizedState.getEth1_deposit_index()).clear();
+    depositNavigableMap.headMap(finalizedState.getEth1_deposit_index(), false).clear();
+  }
+
+  @Override
+  public void onEth1Block(final Bytes32 blockHash, final UnsignedLong blockTimestamp) {
+    eth1DataCache.onEth1Block(blockHash, blockTimestamp);
   }
 
   @Override
   public void onMinGenesisTimeBlock(MinGenesisTimeBlockEvent event) {}
 
-  public SSZList<Deposit> getDeposits(BeaconState state) {
-    UnsignedLong eth1DepositCount = state.getEth1_data().getDeposit_count();
+  public synchronized SSZList<Deposit> getDeposits(BeaconState state, Eth1Data eth1Data) {
+    UnsignedLong eth1DepositCount;
+    if (isEnoughVotesToUpdateEth1Data(getVoteCount(state, eth1Data) + 1)) {
+      eth1DepositCount = eth1Data.getDeposit_count();
+    } else {
+      eth1DepositCount = state.getEth1_data().getDeposit_count();
+    }
 
-    UnsignedLong fromDepositIndex = state.getEth1_deposit_index();
+    UnsignedLong eth1DepositIndex = state.getEth1_deposit_index();
+
+    // We need to have all the deposits that can be included in the state available to ensure
+    // the generated proofs are valid
+    checkRequiredDepositsAvailable(eth1DepositCount, eth1DepositIndex);
+
     UnsignedLong latestDepositIndexWithMaxBlock =
-        fromDepositIndex.plus(UnsignedLong.valueOf(MAX_DEPOSITS));
+        eth1DepositIndex.plus(UnsignedLong.valueOf(MAX_DEPOSITS));
 
     UnsignedLong toDepositIndex =
         latestDepositIndexWithMaxBlock.compareTo(eth1DepositCount) > 0
@@ -95,12 +121,24 @@ public class DepositProvider implements Eth1EventsChannel, FinalizedCheckpointCh
             : latestDepositIndexWithMaxBlock;
 
     return SSZList.createMutable(
-        getDepositsWithProof(fromDepositIndex, toDepositIndex, eth1DepositCount),
+        getDepositsWithProof(eth1DepositIndex, toDepositIndex, eth1DepositCount),
         MAX_DEPOSITS,
         Deposit.class);
   }
 
-  public int getDepositMapSize() {
+  private void checkRequiredDepositsAvailable(
+      final UnsignedLong eth1DepositCount, final UnsignedLong eth1DepositIndex) {
+    // Note that eth1_deposit_index in the state is actually actually the number of deposits
+    // included, so always one bigger than the index of the last included deposit,
+    // hence lastKey().plus(ONE).
+    final UnsignedLong maxPossibleResultingDepositIndex =
+        depositNavigableMap.isEmpty() ? eth1DepositIndex : depositNavigableMap.lastKey().plus(ONE);
+    if (maxPossibleResultingDepositIndex.compareTo(eth1DepositCount) < 0) {
+      throw new MissingDepositsException(maxPossibleResultingDepositIndex, eth1DepositCount);
+    }
+  }
+
+  public synchronized int getDepositMapSize() {
     return depositNavigableMap.size();
   }
 
@@ -112,9 +150,10 @@ public class DepositProvider implements Eth1EventsChannel, FinalizedCheckpointCh
    * @param eth1DepositCount number of deposits in the merkle tree according to Eth1Data in state
    * @return
    */
-  private synchronized List<Deposit> getDepositsWithProof(
+  private List<Deposit> getDepositsWithProof(
       UnsignedLong fromDepositIndex, UnsignedLong toDepositIndex, UnsignedLong eth1DepositCount) {
-    return depositNavigableMap.subMap(fromDepositIndex, toDepositIndex).values().stream()
+    return depositNavigableMap.subMap(fromDepositIndex, true, toDepositIndex, false).values()
+        .stream()
         .map(
             deposit ->
                 new DepositWithIndex(

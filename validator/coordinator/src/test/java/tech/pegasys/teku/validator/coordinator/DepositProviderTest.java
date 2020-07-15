@@ -14,8 +14,10 @@
 package tech.pegasys.teku.validator.coordinator;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.is_valid_merkle_branch;
 
@@ -39,26 +41,27 @@ import tech.pegasys.teku.datastructures.util.MerkleTree;
 import tech.pegasys.teku.datastructures.util.OptimizedMerkleTree;
 import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
 import tech.pegasys.teku.ssz.SSZTypes.SSZList;
+import tech.pegasys.teku.ssz.SSZTypes.SSZMutableList;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.util.config.Constants;
 
 public class DepositProviderTest {
 
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil();
+  private final RecentChainData recentChainData = mock(RecentChainData.class);
+  private final BeaconState state = mock(BeaconState.class);
+  private final Eth1DataCache eth1DataCache = mock(Eth1DataCache.class);
   private List<tech.pegasys.teku.pow.event.Deposit> allSeenDepositsList;
-  private DepositProvider depositProvider;
-  private RecentChainData recentChainData;
-  private BeaconState beaconState;
+  private final DepositProvider depositProvider =
+      new DepositProvider(recentChainData, eth1DataCache);
+  private final Eth1Data randomEth1Data = dataStructureUtil.randomEth1Data();
+
   private MerkleTree depositMerkleTree;
 
   @BeforeEach
   void setUp() {
-    recentChainData = mock(RecentChainData.class);
-    beaconState = mock(BeaconState.class);
-
     depositMerkleTree = new OptimizedMerkleTree(Constants.DEPOSIT_CONTRACT_TREE_DEPTH);
-    depositProvider = new DepositProvider(recentChainData);
-
+    mockStateEth1DataVotes();
     createDepositEvents(40);
   }
 
@@ -68,7 +71,7 @@ public class DepositProviderTest {
     mockStateEth1DepositIndex(2);
     mockEth1DataDepositCount(2);
     mockDepositsFromEth1Block(0, 10);
-    SSZList<Deposit> deposits = depositProvider.getDeposits(beaconState);
+    SSZList<Deposit> deposits = depositProvider.getDeposits(state, randomEth1Data);
     assertThat(deposits).isEmpty();
   }
 
@@ -82,8 +85,30 @@ public class DepositProviderTest {
     mockDepositsFromEth1Block(0, 10);
     mockDepositsFromEth1Block(10, 20);
 
-    SSZList<Deposit> deposits = depositProvider.getDeposits(beaconState);
+    SSZList<Deposit> deposits = depositProvider.getDeposits(state, randomEth1Data);
     assertThat(deposits).hasSize(15);
+    checkThatDepositProofIsValid(deposits);
+  }
+
+  @Test
+  void numberOfDepositsGetsAdjustedAccordingToOurEth1DataVote() {
+    mockStateEth1DepositIndex(5);
+    mockEth1DataDepositCount(20);
+
+    Constants.MAX_DEPOSITS = 30;
+
+    mockDepositsFromEth1Block(0, 10);
+    mockDepositsFromEth1Block(10, 30);
+
+    int enoughVoteCount = Constants.EPOCHS_PER_ETH1_VOTING_PERIOD * Constants.SLOTS_PER_EPOCH;
+    UnsignedLong newDepositCount = UnsignedLong.valueOf(30);
+    Eth1Data newEth1Data = new Eth1Data(Bytes32.ZERO, newDepositCount, Bytes32.ZERO);
+    SSZMutableList<Eth1Data> et1hDataVotes = SSZList.createMutable(Eth1Data.class, 50);
+    IntStream.range(0, enoughVoteCount).forEach(__ -> et1hDataVotes.add(newEth1Data));
+    when(state.getEth1_data_votes()).thenReturn(et1hDataVotes);
+
+    SSZList<Deposit> deposits = depositProvider.getDeposits(state, newEth1Data);
+    assertThat(deposits).hasSize(25);
     checkThatDepositProofIsValid(deposits);
   }
 
@@ -97,7 +122,7 @@ public class DepositProviderTest {
     mockDepositsFromEth1Block(0, 10);
     mockDepositsFromEth1Block(10, 20);
 
-    SSZList<Deposit> deposits = depositProvider.getDeposits(beaconState);
+    SSZList<Deposit> deposits = depositProvider.getDeposits(state, randomEth1Data);
     assertThat(deposits).hasSize(10);
     checkThatDepositProofIsValid(deposits);
   }
@@ -108,13 +133,72 @@ public class DepositProviderTest {
     mockStateEth1DepositIndex(10);
     mockDepositsFromEth1Block(0, 20);
     when(recentChainData.getBlockState(eq(finalizedBlockRoot)))
-        .thenReturn(Optional.ofNullable(beaconState));
+        .thenReturn(Optional.ofNullable(state));
 
     assertThat(depositProvider.getDepositMapSize()).isEqualTo(20);
 
     depositProvider.onNewFinalizedCheckpoint(new Checkpoint(UnsignedLong.ONE, finalizedBlockRoot));
 
     assertThat(depositProvider.getDepositMapSize()).isEqualTo(10);
+  }
+
+  @Test
+  void shouldDelegateOnEth1BlockToEth1DataCache() {
+    final Bytes32 blockHash = dataStructureUtil.randomBytes32();
+    final UnsignedLong blockTimestamp = dataStructureUtil.randomUnsignedLong();
+    depositProvider.onEth1Block(blockHash, blockTimestamp);
+    verify(eth1DataCache).onEth1Block(blockHash, blockTimestamp);
+  }
+
+  @Test
+  void shouldNotifyEth1DataCacheOfDepositBlocks() {
+    final tech.pegasys.teku.pow.event.Deposit deposit =
+        dataStructureUtil.randomDepositEvent(UnsignedLong.ZERO);
+    final DepositsFromBlockEvent event =
+        new DepositsFromBlockEvent(
+            dataStructureUtil.randomUnsignedLong(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomUnsignedLong(),
+            List.of(deposit));
+    depositProvider.onDepositsFromBlock(event);
+
+    depositMerkleTree.add(
+        DepositUtil.convertDepositEventToOperationDeposit(deposit).getData().hash_tree_root());
+    verify(eth1DataCache)
+        .onBlockWithDeposit(
+            event.getBlockTimestamp(),
+            new Eth1Data(depositMerkleTree.getRoot(), UnsignedLong.ONE, event.getBlockHash()));
+  }
+
+  @Test
+  void shouldNotThrowMissingDepositsExceptionWhenAllKnownDepositsHaveBeenIncluded() {
+    mockStateEth1DepositIndex(5);
+    mockEth1DataDepositCount(5);
+    mockDepositsFromEth1Block(0, 5);
+    assertThat(depositProvider.getDeposits(state, randomEth1Data)).isEmpty();
+  }
+
+  @Test
+  void shouldThrowMissingDepositsExceptionWhenRequiredDepositsAreNotAvailable() {
+    mockStateEth1DepositIndex(5);
+    mockEth1DataDepositCount(10);
+    assertThatThrownBy(() -> depositProvider.getDeposits(state, randomEth1Data))
+        .isInstanceOf(MissingDepositsException.class)
+        .hasMessageContaining("6 to 10");
+  }
+
+  @Test
+  void shouldThrowMissingDepositsExceptionWhenAllDepositsRequiredForStateNotAvailable() {
+    // To generate a valid proof we need the deposits up to state deposit count
+    // So fail even if we could have filled MAX_DEPOSITS
+    Constants.MAX_DEPOSITS = 1;
+    mockDepositsFromEth1Block(0, 8);
+    mockStateEth1DepositIndex(5);
+    mockEth1DataDepositCount(10);
+
+    assertThatThrownBy(() -> depositProvider.getDeposits(state, randomEth1Data))
+        .isInstanceOf(MissingDepositsException.class)
+        .hasMessageContaining("9 to 10");
   }
 
   private void checkThatDepositProofIsValid(SSZList<Deposit> deposits) {
@@ -138,6 +222,12 @@ public class DepositProviderTest {
   }
 
   private void mockDepositsFromEth1Block(int startIndex, int n) {
+    allSeenDepositsList.subList(startIndex, n).stream()
+        .map(DepositUtil::convertDepositEventToOperationDeposit)
+        .map(Deposit::getData)
+        .map(DepositData::hash_tree_root)
+        .forEachOrdered(depositMerkleTree::add);
+
     DepositsFromBlockEvent depositsFromBlockEvent = mock(DepositsFromBlockEvent.class);
     when(depositsFromBlockEvent.getDeposits())
         .thenReturn(allSeenDepositsList.subList(startIndex, startIndex + n));
@@ -145,18 +235,16 @@ public class DepositProviderTest {
   }
 
   private void mockEth1DataDepositCount(int n) {
-    allSeenDepositsList.subList(0, n).stream()
-        .map(DepositUtil::convertDepositEventToOperationDeposit)
-        .map(Deposit::getData)
-        .map(DepositData::hash_tree_root)
-        .forEachOrdered(depositMerkleTree::add);
-
     Eth1Data eth1Data = mock(Eth1Data.class);
-    when(beaconState.getEth1_data()).thenReturn(eth1Data);
+    when(state.getEth1_data()).thenReturn(eth1Data);
     when(eth1Data.getDeposit_count()).thenReturn(UnsignedLong.valueOf(n));
   }
 
   private void mockStateEth1DepositIndex(int n) {
-    when(beaconState.getEth1_deposit_index()).thenReturn(UnsignedLong.valueOf(n));
+    when(state.getEth1_deposit_index()).thenReturn(UnsignedLong.valueOf(n));
+  }
+
+  private void mockStateEth1DataVotes() {
+    when(state.getEth1_data_votes()).thenReturn(SSZList.empty(Eth1Data.class));
   }
 }

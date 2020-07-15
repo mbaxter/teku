@@ -14,6 +14,7 @@
 package tech.pegasys.teku.datastructures.util;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.util.stream.Collectors.toList;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_epoch_at_slot;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_signing_root;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_start_slot_at_epoch;
@@ -29,7 +30,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -91,10 +91,7 @@ public class AttestationUtil {
 
     return new IndexedAttestation(
         SSZList.createMutable(
-            attesting_indices.stream()
-                .sorted()
-                .map(UnsignedLong::valueOf)
-                .collect(Collectors.toList()),
+            attesting_indices.stream().sorted().map(UnsignedLong::valueOf).collect(toList()),
             MAX_VALIDATORS_PER_COMMITTEE,
             UnsignedLong.class),
         attestation.getData(),
@@ -138,28 +135,29 @@ public class AttestationUtil {
    * @see
    *     <a>https://github.com/ethereum/eth2.0-specs/blob/v0.8.0/specs/core/0_beacon-chain.md#is_valid_indexed_attestation</a>
    */
-  public static boolean is_valid_indexed_attestation(
+  public static AttestationProcessingResult is_valid_indexed_attestation(
       BeaconState state, IndexedAttestation indexed_attestation) {
     return is_valid_indexed_attestation(state, indexed_attestation, BLSSignatureVerifier.SIMPLE);
   }
 
-  public static boolean is_valid_indexed_attestation(
+  public static AttestationProcessingResult is_valid_indexed_attestation(
       BeaconState state,
       IndexedAttestation indexed_attestation,
       BLSSignatureVerifier signatureVerifier) {
-    SSZList<UnsignedLong> attesting_indices = indexed_attestation.getAttesting_indices();
+    SSZList<UnsignedLong> indices = indexed_attestation.getAttesting_indices();
 
     List<UnsignedLong> bit_0_indices_sorted =
-        attesting_indices.stream().sorted().distinct().collect(Collectors.toList());
-    if (!attesting_indices.equals(bit_0_indices_sorted)) {
-      LOG.debug("AttestationUtil.is_valid_indexed_attestation: Verify indices are sorted");
-      return false;
+        indices.stream().sorted().distinct().collect(toList());
+    if (indices.isEmpty() || !indices.equals(bit_0_indices_sorted)) {
+      return AttestationProcessingResult.invalid("Attesting indices are not sorted");
     }
 
     List<BLSPublicKey> pubkeys =
-        attesting_indices.stream()
-            .map(i -> getValidatorPubKey(state, i))
-            .collect(Collectors.toList());
+        indices.stream().flatMap(i -> getValidatorPubKey(state, i).stream()).collect(toList());
+    if (pubkeys.size() < indices.size()) {
+      return AttestationProcessingResult.invalid(
+          "Attesting indices include non-existent validator");
+    }
 
     BLSSignature signature = indexed_attestation.getSignature();
     Bytes domain =
@@ -169,9 +167,9 @@ public class AttestationUtil {
 
     if (!signatureVerifier.verify(pubkeys, signing_root, signature)) {
       LOG.debug("AttestationUtil.is_valid_indexed_attestation: Verify aggregate signature");
-      return false;
+      return AttestationProcessingResult.invalid("Signature is invalid");
     }
-    return true;
+    return AttestationProcessingResult.SUCCESSFUL;
   }
 
   // Set bits of the newAttestation on the oldBitlist

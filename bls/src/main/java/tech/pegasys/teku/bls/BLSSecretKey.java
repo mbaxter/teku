@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
+import tech.pegasys.teku.bls.mikuli.Scalar;
 import tech.pegasys.teku.bls.mikuli.SecretKey;
 
 public final class BLSSecretKey {
@@ -38,12 +39,32 @@ public final class BLSSecretKey {
    *
    * @param secretKey A Mikuli SecretKey
    */
-  BLSSecretKey(SecretKey secretKey) {
+  public BLSSecretKey(SecretKey secretKey) {
     this.secretKey = secretKey;
   }
 
   public SecretKey getSecretKey() {
     return secretKey;
+  }
+
+  public Bytes toBytes() {
+    final Bytes bytes = secretKey.toBytes();
+    if (bytes.size() == 48) {
+      final int paddingLength = 48 - 32;
+      if (bytes.slice(0, paddingLength).isZero()) {
+        return bytes.slice(paddingLength, 32);
+      }
+    }
+    return bytes;
+  }
+
+  public Scalar getScalarValue() {
+    return secretKey.getScalarValue();
+  }
+
+  /** Overwrites the key with zeros so that it is no longer in memory */
+  public void destroy() {
+    secretKey.getScalarValue().destroy();
   }
 
   @Override

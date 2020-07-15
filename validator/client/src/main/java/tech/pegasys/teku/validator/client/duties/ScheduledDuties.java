@@ -13,22 +13,18 @@
 
 package tech.pegasys.teku.validator.client.duties;
 
-import com.google.common.base.Throwables;
+import static tech.pegasys.teku.logging.ValidatorLogger.VALIDATOR_LOGGER;
+
 import com.google.common.primitives.UnsignedLong;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.util.async.SafeFuture;
-import tech.pegasys.teku.validator.api.NodeSyncingException;
 import tech.pegasys.teku.validator.client.Validator;
 
 public class ScheduledDuties {
-  private static final Logger LOG = LogManager.getLogger();
-
   private final NavigableMap<UnsignedLong, BlockProductionDuty> blockProductionDuties =
       new TreeMap<>();
   private final NavigableMap<UnsignedLong, AttestationProductionDuty> attestationProductionDuties =
@@ -50,10 +46,12 @@ public class ScheduledDuties {
       final UnsignedLong slot,
       final Validator validator,
       final int attestationCommitteeIndex,
-      final int attestationCommitteePosition) {
+      final int attestationCommitteePosition,
+      final int validatorIndex) {
     return attestationProductionDuties
         .computeIfAbsent(slot, dutyFactory::createAttestationProductionDuty)
-        .addValidator(validator, attestationCommitteeIndex, attestationCommitteePosition);
+        .addValidator(
+            validator, attestationCommitteeIndex, attestationCommitteePosition, validatorIndex);
   }
 
   public synchronized void scheduleAggregationDuties(
@@ -95,18 +93,18 @@ public class ScheduledDuties {
     }
     duty.performDuty()
         .finish(
-            () -> LOG.trace("{} completed successfully", duty::describe),
-            error -> {
-              if (Throwables.getRootCause(error) instanceof NodeSyncingException) {
-                LOG.debug("{} skipped because node was syncing", duty::describe);
-                return;
-              }
-              LOG.error(duty.describe() + " failed", error);
-            });
+            result -> result.report(duty.getProducedType(), slot, VALIDATOR_LOGGER),
+            error -> VALIDATOR_LOGGER.dutyFailed(duty.getProducedType(), slot, error));
   }
 
   private void discardDutiesBeforeSlot(
       final NavigableMap<UnsignedLong, ? extends Duty> duties, final UnsignedLong slot) {
-    duties.subMap(UnsignedLong.ZERO, slot).clear();
+    duties.subMap(UnsignedLong.ZERO, true, slot, false).clear();
+  }
+
+  public int countDuties() {
+    return blockProductionDuties.size()
+        + attestationProductionDuties.size()
+        + aggregationDuties.size();
   }
 }

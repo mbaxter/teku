@@ -32,6 +32,8 @@ import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.BeaconChainMethods;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseStream.ResponseListener;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ExtraDataAppendedException;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ServerErrorException;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.RpcEncoding;
 import tech.pegasys.teku.util.Waiter;
 import tech.pegasys.teku.util.async.SafeFuture;
@@ -82,7 +84,7 @@ public abstract class Eth2OutgoingRequestHandlerTest
       deliverChunk(i);
       assertThat(finishedProcessingFuture).isNotDone();
     }
-    inputStream.close();
+    complete();
 
     asyncRequestRunner.waitForExactly(maxChunks - 1);
     assertThat(finishedProcessingFuture).isNotDone();
@@ -105,7 +107,7 @@ public abstract class Eth2OutgoingRequestHandlerTest
       deliverChunk(i);
       assertThat(finishedProcessingFuture).isNotDone();
     }
-    inputStream.close();
+    complete();
 
     asyncRequestRunner.waitForExactly(maxChunks - 1);
     assertThat(finishedProcessingFuture).isNotDone();
@@ -135,7 +137,7 @@ public abstract class Eth2OutgoingRequestHandlerTest
     deliverChunk(0);
     assertThat(finishedProcessingFuture).isNotDone();
     deliverError();
-    inputStream.close();
+    complete();
 
     asyncRequestRunner.waitForExactly(1);
     Waiter.waitFor(() -> assertThat(finishedProcessingFuture).isDone());
@@ -155,22 +157,22 @@ public abstract class Eth2OutgoingRequestHandlerTest
         // Send 2 chunks in the last batch of data which should only contain 1 chunk
         final Bytes lastChunk = chunks.get(i);
         final Bytes lastChunkWithExtraChunk = Bytes.concatenate(lastChunk, lastChunk);
-        deliverBytes(lastChunkWithExtraChunk, lastChunk.size());
+        deliverBytes(lastChunkWithExtraChunk);
       } else {
         deliverChunk(i);
       }
     }
-    inputStream.close();
+    complete();
 
-    asyncRequestRunner.waitForExactly(maxChunks);
+    asyncRequestRunner.waitForExactly(maxChunks - 1);
     timeoutRunner.executeUntilDone();
     Waiter.waitFor(() -> assertThat(finishedProcessingFuture).isDone());
 
     verify(rpcStream).close();
-    assertThat(blocks.size()).isEqualTo(3);
+    assertThat(blocks.size()).isEqualTo(2);
     assertThat(finishedProcessingFuture).isCompletedExceptionally();
     assertThatThrownBy(finishedProcessingFuture::get)
-        .hasRootCause(RpcException.EXTRA_DATA_APPENDED);
+        .hasRootCause(new ExtraDataAppendedException());
   }
 
   @Test
@@ -266,18 +268,18 @@ public abstract class Eth2OutgoingRequestHandlerTest
     return rpcEncoder.encodeSuccessfulResponse(block);
   }
 
-  private void deliverError() throws IOException {
-    final Bytes errorChunk = rpcEncoder.encodeErrorResponse(RpcException.SERVER_ERROR);
+  private void deliverError() {
+    final Bytes errorChunk = rpcEncoder.encodeErrorResponse(new ServerErrorException());
     deliverBytes(errorChunk);
   }
 
-  private void deliverChunk(final int chunk) throws IOException {
+  private void deliverChunk(final int chunk) {
     final Bytes chunkBytes = chunks.get(chunk);
     deliverBytes(chunkBytes);
-    if (chunk < maxChunks - 1) {
-      // Make sure we finish processing this chunk, and loop back around to wait on the next
-      Waiter.waitFor(() -> assertThat(inputStream.isWaitingOnNextByteToBeDelivered()).isTrue());
-    }
+  }
+
+  private void complete() {
+    reqHandler.complete(nodeId, rpcStream);
   }
 
   public static class Eth2OutgoingRequestHandlerTest_ssz extends Eth2OutgoingRequestHandlerTest {

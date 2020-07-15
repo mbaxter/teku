@@ -13,6 +13,9 @@
 
 package tech.pegasys.teku.networking.eth2.peers;
 
+import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVALID_REQUEST_CODE;
+import static tech.pegasys.teku.util.config.Constants.MAX_REQUEST_BLOCKS;
+
 import com.google.common.base.MoreObjects;
 import com.google.common.primitives.UnsignedLong;
 import java.util.List;
@@ -20,6 +23,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
@@ -28,34 +33,46 @@ import tech.pegasys.teku.datastructures.networking.libp2p.rpc.BeaconBlocksByRoot
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.EmptyMessage;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.GoodbyeMessage;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.MetadataMessage;
+import tech.pegasys.teku.datastructures.networking.libp2p.rpc.PingMessage;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.RpcRequest;
 import tech.pegasys.teku.datastructures.networking.libp2p.rpc.StatusMessage;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.BeaconChainMethods;
+import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessagesFactory;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
 import tech.pegasys.teku.networking.eth2.rpc.core.Eth2OutgoingRequestHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.Eth2RpcMethod;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseStream;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseStream.ResponseListener;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseStreamImpl;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.p2p.peer.DelegatingPeer;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
+import tech.pegasys.teku.ssz.SSZTypes.Bitvector;
 import tech.pegasys.teku.util.async.SafeFuture;
 
 public class Eth2Peer extends DelegatingPeer implements Peer {
+  private static final Logger LOG = LogManager.getLogger();
+
   private final BeaconChainMethods rpcMethods;
   private final StatusMessageFactory statusMessageFactory;
+  private final MetadataMessagesFactory metadataMessagesFactory;
   private volatile Optional<PeerStatus> remoteStatus = Optional.empty();
+  private volatile Optional<UnsignedLong> remoteMetadataSeqNumber = Optional.empty();
+  private volatile Optional<Bitvector> remoteAttSubnets = Optional.empty();
   private final SafeFuture<PeerStatus> initialStatus = new SafeFuture<>();
-  private AtomicBoolean chainValidated = new AtomicBoolean(false);
-  private AtomicInteger outstandingRequests = new AtomicInteger(0);
+  private final AtomicBoolean chainValidated = new AtomicBoolean(false);
+  private final AtomicInteger outstandingRequests = new AtomicInteger(0);
+  private final AtomicInteger outstandingPings = new AtomicInteger();
 
   public Eth2Peer(
       final Peer peer,
       final BeaconChainMethods rpcMethods,
-      final StatusMessageFactory statusMessageFactory) {
+      final StatusMessageFactory statusMessageFactory,
+      final MetadataMessagesFactory metadataMessagesFactory) {
     super(peer);
     this.rpcMethods = rpcMethods;
     this.statusMessageFactory = statusMessageFactory;
+    this.metadataMessagesFactory = metadataMessagesFactory;
   }
 
   public void updateStatus(final PeerStatus status) {
@@ -63,12 +80,33 @@ public class Eth2Peer extends DelegatingPeer implements Peer {
     initialStatus.complete(status);
   }
 
+  public void updateMetadataSeqNumber(final UnsignedLong seqNumber) {
+    Optional<UnsignedLong> curValue = this.remoteMetadataSeqNumber;
+    remoteMetadataSeqNumber = Optional.of(seqNumber);
+    if (curValue.isEmpty() || seqNumber.compareTo(curValue.get()) > 0) {
+      requestMetadata()
+          .finish(
+              this::updateMetadata, error -> LOG.debug("Failed to retrieve peer metadata", error));
+    }
+  }
+
+  private void updateMetadata(final MetadataMessage metadataMessage) {
+    remoteMetadataSeqNumber = Optional.of(metadataMessage.getSeqNumber());
+    remoteAttSubnets = Optional.of(metadataMessage.getAttnets());
+  }
+
   public void subscribeInitialStatus(final InitialStatusSubscriber subscriber) {
-    initialStatus.finish(subscriber::onInitialStatus);
+    initialStatus.finish(
+        subscriber::onInitialStatus,
+        error -> LOG.debug("Failed to retrieve initial status", error));
   }
 
   public PeerStatus getStatus() {
     return remoteStatus.orElseThrow();
+  }
+
+  public Optional<Bitvector> getRemoteAttestationSubnets() {
+    return remoteAttSubnets;
   }
 
   public UnsignedLong finalizedEpoch() {
@@ -110,7 +148,12 @@ public class Eth2Peer extends DelegatingPeer implements Peer {
   }
 
   public SafeFuture<Void> requestBlocksByRoot(
-      final List<Bytes32> blockRoots, final ResponseListener<SignedBeaconBlock> listener) {
+      final List<Bytes32> blockRoots, final ResponseListener<SignedBeaconBlock> listener)
+      throws RpcException {
+    if (blockRoots.size() > MAX_REQUEST_BLOCKS) {
+      throw new RpcException(
+          INVALID_REQUEST_CODE, "Only a maximum of " + MAX_REQUEST_BLOCKS + " can per request");
+    }
     final Eth2RpcMethod<BeaconBlocksByRootRequestMessage, SignedBeaconBlock> blockByRoot =
         rpcMethods.beaconBlocksByRoot();
     return requestStream(blockByRoot, new BeaconBlocksByRootRequestMessage(blockRoots), listener);
@@ -142,7 +185,19 @@ public class Eth2Peer extends DelegatingPeer implements Peer {
   }
 
   public SafeFuture<MetadataMessage> requestMetadata() {
-    return requestSingleItem(rpcMethods.getMetadata(), new EmptyMessage());
+    return requestSingleItem(rpcMethods.getMetadata(), EmptyMessage.EMPTY_MESSAGE);
+  }
+
+  public SafeFuture<UnsignedLong> sendPing() {
+    outstandingPings.getAndIncrement();
+    return requestSingleItem(rpcMethods.ping(), metadataMessagesFactory.createPingMessage())
+        .thenApply(PingMessage::getSeqNumber)
+        .thenPeek(__ -> outstandingPings.set(0))
+        .thenPeek(this::updateMetadataSeqNumber);
+  }
+
+  public int getOutstandingPings() {
+    return outstandingPings.get();
   }
 
   private <I extends RpcRequest, O> SafeFuture<Void> sendMessage(

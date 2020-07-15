@@ -36,6 +36,8 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tech.pegasys.teku.storage.server.DatabaseVersion;
+import tech.pegasys.teku.storage.server.VersionedDatabaseFactory;
 import tech.pegasys.teku.util.config.Eth1Address;
 import tech.pegasys.teku.util.config.LoggingDestination;
 import tech.pegasys.teku.util.config.NetworkDefinition;
@@ -203,7 +205,9 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
     final URL configFile = this.getClass().getResource("/complete_config.yaml");
     final String updatedConfig =
         Resources.toString(configFile, UTF_8)
-            .replace("data-path: \".\"", "data-path: \"" + dataPath.toString() + "\"");
+            .replace(
+                "data-path: \".\"",
+                "data-path: \"" + dataPath.toString().replace("\\", "\\\\") + "\"");
     return createTempFile(updatedConfig.getBytes(UTF_8));
   }
 
@@ -239,6 +243,7 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
 
   private TekuConfigurationBuilder expectedDefaultConfigurationBuilder() {
     return expectedConfigurationBuilder()
+        .setNetwork(NetworkDefinition.fromCliArg("altona"))
         .setEth1DepositContractAddress(null)
         .setEth1Endpoint(null)
         .setMetricsCategories(
@@ -246,7 +251,7 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
         .setP2pAdvertisedPort(OptionalInt.empty())
         .setP2pDiscoveryEnabled(true)
         .setP2pInterface("0.0.0.0")
-        .setP2pPort(30303)
+        .setP2pPort(9000)
         .setP2pPrivateKeyFile(null)
         .setInteropEnabled(false)
         .setInteropGenesisTime(0)
@@ -271,28 +276,26 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
         .setP2pInterface("1.2.3.4")
         .setP2pPort(1234)
         .setP2pDiscoveryEnabled(false)
-        .setP2pDiscoveryBootnodes(Collections.emptyList())
         .setP2pAdvertisedPort(OptionalInt.of(9000))
         .setP2pAdvertisedIp(Optional.empty())
         .setP2pPrivateKeyFile("path/to/file")
-        .setP2pPeerLowerBound(20)
-        .setP2pPeerUpperBound(30)
+        .setP2pPeerLowerBound(64)
+        .setP2pPeerUpperBound(74)
         .setP2pStaticPeers(Collections.emptyList())
         .setInteropGenesisTime(1)
-        .setInitialState("")
         .setInteropOwnedValidatorStartIndex(0)
         .setInteropOwnedValidatorCount(64)
         .setInteropNumberOfValidators(64)
         .setInteropEnabled(true)
         .setEth1DepositContractAddress(address)
         .setEth1Endpoint("http://localhost:8545")
-        .setEth1Enabled(true)
+        .setEth1DepositsFromStorageEnabled(true)
         .setMetricsEnabled(false)
         .setMetricsPort(8008)
         .setMetricsInterface("127.0.0.1")
         .setMetricsCategories(
             Arrays.asList("BEACON", "LIBP2P", "NETWORK", "EVENTBUS", "JVM", "PROCESS"))
-        .setMetricsHostWhitelist(List.of("127.0.0.1", "localhost"))
+        .setMetricsHostAllowlist(List.of("127.0.0.1", "localhost"))
         .setLogColorEnabled(true)
         .setLogDestination(DEFAULT_BOTH)
         .setLogFile(DEFAULT_LOG_FILE)
@@ -303,10 +306,13 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
         .setValidatorExternalSignerTimeout(1000)
         .setDataPath(dataPath.toString())
         .setDataStorageMode(PRUNE)
+        .setDataStorageFrequency(VersionedDatabaseFactory.DEFAULT_STORAGE_FREQUENCY)
+        .setDataStorageCreateDbVersion(DatabaseVersion.DEFAULT_VERSION.getValue())
         .setRestApiPort(5051)
         .setRestApiDocsEnabled(false)
         .setRestApiEnabled(false)
-        .setRestApiInterface("127.0.0.1");
+        .setRestApiInterface("127.0.0.1")
+        .setRestApiHostAllowlist(List.of("127.0.0.1", "localhost"));
   }
 
   private void assertTekuConfiguration(final TekuConfiguration expected) {

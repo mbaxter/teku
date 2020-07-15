@@ -20,7 +20,6 @@ import java.io.File;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes48;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -35,7 +34,7 @@ import tech.pegasys.signers.bls.keystore.model.KeyStoreData;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSecretKey;
-import tech.pegasys.teku.util.cli.VersionProvider;
+import tech.pegasys.teku.util.cli.PicoCliVersionProvider;
 
 @Command(
     name = "register",
@@ -44,7 +43,7 @@ import tech.pegasys.teku.util.cli.VersionProvider;
     mixinStandardHelpOptions = true,
     showDefaultValues = true,
     abbreviateSynopsis = true,
-    versionProvider = VersionProvider.class,
+    versionProvider = PicoCliVersionProvider.class,
     synopsisHeading = "%n",
     descriptionHeading = "%nDescription:%n%n",
     optionListHeading = "%nOptions:%n",
@@ -54,7 +53,7 @@ public class DepositRegisterCommand implements Runnable {
   private final Consumer<Integer> shutdownFunction;
   private final Function<String, String> envSupplier;
   @Spec private CommandSpec spec;
-  @Mixin private CommonParams params;
+  @Mixin private RegisterParams registerParams;
 
   @ArgGroup(exclusive = true, multiplicity = "1")
   private ValidatorKeyOptions validatorKeyOptions;
@@ -65,6 +64,8 @@ public class DepositRegisterCommand implements Runnable {
       required = true,
       description = "Public withdrawal key for the validator")
   private String withdrawalKey;
+
+  @Mixin private VerboseOutputParam verboseOutputParam;
 
   DepositRegisterCommand() {
     // required because web3j use non-daemon threads which halts the program
@@ -77,22 +78,24 @@ public class DepositRegisterCommand implements Runnable {
       final Consumer<Integer> shutdownFunction,
       final Function<String, String> envSupplier,
       final CommandSpec spec,
-      final CommonParams params,
+      final RegisterParams registerParams,
       final ValidatorKeyOptions validatorKeyOptions,
       final String withdrawalKey) {
     this.shutdownFunction = shutdownFunction;
     this.envSupplier = envSupplier;
     this.spec = spec;
-    this.params = params;
+    this.registerParams = registerParams;
     this.validatorKeyOptions = validatorKeyOptions;
     this.withdrawalKey = withdrawalKey;
+    this.verboseOutputParam = new VerboseOutputParam(true);
   }
 
   @Override
   public void run() {
     final BLSKeyPair validatorKey = getValidatorKey();
 
-    try (final RegisterAction registerAction = params.createRegisterAction()) {
+    try (final RegisterAction registerAction =
+        registerParams.createRegisterAction(verboseOutputParam.isVerboseOutputEnabled())) {
       final BLSPublicKey withdrawalPublicKey =
           BLSPublicKey.fromBytesCompressed(Bytes.fromHexString(this.withdrawalKey));
       registerAction.displayConfirmation(1);
@@ -147,7 +150,7 @@ public class DepositRegisterCommand implements Runnable {
   }
 
   private BLSKeyPair privateKeyToKeyPair(final Bytes validatorKey) {
-    return new BLSKeyPair(BLSSecretKey.fromBytes(Bytes48.leftPad(validatorKey)));
+    return new BLSKeyPair(BLSSecretKey.fromBytes(validatorKey));
   }
 
   static class ValidatorKeyOptions {

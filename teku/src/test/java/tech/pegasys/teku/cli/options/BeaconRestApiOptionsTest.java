@@ -44,4 +44,31 @@ public class BeaconRestApiOptionsTest extends AbstractBeaconNodeCommandTest {
         getTekuConfigurationFromArguments("--rest-api-enabled");
     assertThat(tekuConfiguration.isRestApiEnabled()).isTrue();
   }
+
+  @Test
+  public void restApiHostAllowlist_shouldNotRequireAValue() {
+    final TekuConfiguration tekuConfiguration =
+        getTekuConfigurationFromArguments("--rest-api-host-allowlist");
+    assertThat(tekuConfiguration.getRestApiHostAllowlist()).isEmpty();
+  }
+
+  @Test
+  public void restApiHostAllowlist_shouldSupportAllowingMultipleHosts() {
+    final TekuConfiguration tekuConfiguration =
+        getTekuConfigurationFromArguments("--rest-api-host-allowlist", "my.host,their.host");
+    assertThat(tekuConfiguration.getRestApiHostAllowlist()).containsOnly("my.host", "their.host");
+  }
+
+  @Test
+  public void restApiHostAllowlist_shouldSupportAllowingAllHosts() {
+    final TekuConfiguration tekuConfiguration =
+        getTekuConfigurationFromArguments("--rest-api-host-allowlist", "*");
+    assertThat(tekuConfiguration.getRestApiHostAllowlist()).containsOnly("*");
+  }
+
+  @Test
+  public void restApiHostAllowlist_shouldDefaultToLocalhost() {
+    assertThat(getTekuConfigurationFromArguments().getRestApiHostAllowlist())
+        .containsOnly("localhost", "127.0.0.1");
+  }
 }

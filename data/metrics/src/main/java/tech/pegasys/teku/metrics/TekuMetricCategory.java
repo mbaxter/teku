@@ -19,8 +19,13 @@ import org.hyperledger.besu.plugin.services.metrics.MetricCategory;
 public enum TekuMetricCategory implements MetricCategory {
   BEACON("beacon"),
   EVENTBUS("eventbus"),
+  EXECUTOR("executor"),
   LIBP2P("libp2p"),
-  NETWORK("network");
+  NETWORK("network"),
+  STORAGE("storage"),
+  STORAGE_HOT_DB("storage_hot"),
+  STORAGE_FINALIZED_DB("storage_finalized"),
+  VALIDATOR("validator");
 
   private final String name;
 

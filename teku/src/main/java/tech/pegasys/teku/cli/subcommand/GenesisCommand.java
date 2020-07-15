@@ -27,7 +27,7 @@ import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.util.MockStartValidatorKeyPairFactory;
 import tech.pegasys.teku.statetransition.util.StartupUtil;
-import tech.pegasys.teku.util.cli.VersionProvider;
+import tech.pegasys.teku.util.cli.PicoCliVersionProvider;
 
 @Command(
     name = "genesis",
@@ -35,7 +35,7 @@ import tech.pegasys.teku.util.cli.VersionProvider;
     showDefaultValues = true,
     abbreviateSynopsis = true,
     mixinStandardHelpOptions = true,
-    versionProvider = VersionProvider.class,
+    versionProvider = PicoCliVersionProvider.class,
     synopsisHeading = "%n",
     descriptionHeading = "%nDescription:%n%n",
     optionListHeading = "%nOptions:%n",
@@ -49,7 +49,7 @@ public class GenesisCommand {
       mixinStandardHelpOptions = true,
       showDefaultValues = true,
       abbreviateSynopsis = true,
-      versionProvider = VersionProvider.class,
+      versionProvider = PicoCliVersionProvider.class,
       synopsisHeading = "%n",
       descriptionHeading = "%nDescription:%n%n",
       optionListHeading = "%nOptions:%n",
@@ -82,19 +82,19 @@ public class GenesisCommand {
 
   public static class MockGenesisParams {
     @Option(
-        names = {"-o", "--outputFile"},
+        names = {"-o", "--output-file"},
         paramLabel = "<FILENAME>",
-        description = "Path/filename of the output file")
+        description = "Path/filename of the output file\nDefault: stdout")
     private String outputFile = null;
 
     @Option(
-        names = {"-v", "--validatorCount"},
+        names = {"-v", "--validator-count"},
         paramLabel = "<VALIDATOR_COUNT>",
         description = "The number of validators to include")
     private int validatorCount = 64;
 
     @Option(
-        names = {"-t", "--genesisTime"},
+        names = {"-t", "--genesis-time"},
         paramLabel = "<GENESIS_TIME>",
         description = "The genesis time")
     private long genesisTime = System.currentTimeMillis() / 1000;

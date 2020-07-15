@@ -16,26 +16,24 @@ package tech.pegasys.teku.statetransition.forkchoice;
 import static tech.pegasys.teku.core.ForkChoiceUtil.on_attestation;
 import static tech.pegasys.teku.core.ForkChoiceUtil.on_block;
 
+import com.google.common.primitives.UnsignedLong;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.core.StateTransition;
-import tech.pegasys.teku.core.results.AttestationProcessingResult;
 import tech.pegasys.teku.core.results.BlockImportResult;
-import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.datastructures.attestation.ValidateableAttestation;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.forkchoice.MutableStore;
-import tech.pegasys.teku.datastructures.operations.Attestation;
-import tech.pegasys.teku.datastructures.state.Checkpoint;
-import tech.pegasys.teku.protoarray.ProtoArrayForkChoiceStrategy;
-import tech.pegasys.teku.storage.Store;
-import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
+import tech.pegasys.teku.datastructures.operations.IndexedAttestation;
+import tech.pegasys.teku.datastructures.util.AttestationProcessingResult;
+import tech.pegasys.teku.protoarray.ForkChoiceStrategy;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
 
-public class ForkChoice implements FinalizedCheckpointChannel {
+public class ForkChoice {
 
   private final RecentChainData recentChainData;
   private final StateTransition stateTransition;
-
-  private ProtoArrayForkChoiceStrategy protoArrayForkChoiceStrategy;
 
   public ForkChoice(final RecentChainData recentChainData, final StateTransition stateTransition) {
     this.recentChainData = recentChainData;
@@ -44,39 +42,72 @@ public class ForkChoice implements FinalizedCheckpointChannel {
   }
 
   private void initializeProtoArrayForkChoice() {
-    protoArrayForkChoiceStrategy = ProtoArrayForkChoiceStrategy.create(recentChainData.getStore());
     processHead();
   }
 
   public synchronized Bytes32 processHead() {
-    Store.Transaction transaction = recentChainData.startStoreTransaction();
-    Bytes32 headBlockRoot = protoArrayForkChoiceStrategy.findHead(transaction);
+    return processHead(Optional.empty());
+  }
+
+  public synchronized Bytes32 processHead(UnsignedLong nodeSlot) {
+    return processHead(Optional.of(nodeSlot));
+  }
+
+  public synchronized Bytes32 processHead(Optional<UnsignedLong> nodeSlot) {
+    StoreTransaction transaction = recentChainData.startStoreTransaction();
+    final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
+    Bytes32 headBlockRoot = forkChoiceStrategy.findHead(transaction);
     transaction.commit(() -> {}, "Failed to persist validator vote changes.");
-    BeaconBlock headBlock = recentChainData.getStore().getBlock(headBlockRoot);
-    recentChainData.updateBestBlock(headBlockRoot, headBlock.getSlot());
+    recentChainData.updateBestBlock(
+        headBlockRoot,
+        nodeSlot.orElse(
+            forkChoiceStrategy
+                .blockSlot(headBlockRoot)
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException(
+                            "Unable to retrieve the slot of fork choice head"))));
     return headBlockRoot;
   }
 
   public synchronized BlockImportResult onBlock(final SignedBeaconBlock block) {
-    Store.Transaction transaction = recentChainData.startStoreTransaction();
-    final BlockImportResult result = on_block(transaction, block, stateTransition);
+    final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
+    StoreTransaction transaction = recentChainData.startStoreTransaction();
+    final BlockImportResult result =
+        on_block(transaction, block, stateTransition, forkChoiceStrategy);
 
     if (!result.isSuccessful()) {
       return result;
     }
 
     transaction.commit().join();
-    protoArrayForkChoiceStrategy.onBlock(recentChainData.getStore(), block.getMessage());
+    result
+        .getBlockProcessingRecord()
+        .ifPresent(record -> forkChoiceStrategy.onBlock(block.getMessage(), record.getPostState()));
+
     return result;
   }
 
   public AttestationProcessingResult onAttestation(
-      final MutableStore store, final Attestation attestation) {
-    return on_attestation(store, attestation, stateTransition, protoArrayForkChoiceStrategy);
+      final MutableStore store, final ValidateableAttestation attestation) {
+    return on_attestation(store, attestation, stateTransition, getForkChoiceStrategy());
   }
 
-  @Override
-  public void onNewFinalizedCheckpoint(final Checkpoint checkpoint) {
-    protoArrayForkChoiceStrategy.maybePrune(checkpoint.getRoot());
+  public void save() {
+    getForkChoiceStrategy().save();
+  }
+
+  public void applyIndexedAttestation(
+      final MutableStore store, final IndexedAttestation indexedAttestation) {
+    getForkChoiceStrategy().onAttestation(store, indexedAttestation);
+  }
+
+  private ForkChoiceStrategy getForkChoiceStrategy() {
+    return recentChainData
+        .getForkChoiceStrategy()
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "Attempting to perform fork choice operations before store has been initialized"));
   }
 }

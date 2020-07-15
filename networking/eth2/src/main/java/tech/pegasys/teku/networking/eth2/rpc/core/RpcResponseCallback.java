@@ -15,9 +15,10 @@ package tech.pegasys.teku.networking.eth2.rpc.core;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ServerErrorException;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
 import tech.pegasys.teku.networking.p2p.rpc.RpcStream;
-import tech.pegasys.teku.networking.p2p.rpc.RpcStream.StreamClosedException;
+import tech.pegasys.teku.networking.p2p.rpc.StreamClosedException;
 
 class RpcResponseCallback<TResponse> implements ResponseCallback<TResponse> {
   private static final Logger LOG = LogManager.getLogger();
@@ -60,7 +61,7 @@ class RpcResponseCallback<TResponse> implements ResponseCallback<TResponse> {
       // But close the stream just to be completely sure we don't leak any resources.
       rpcStream.close().reportExceptions();
     } else {
-      completeWithErrorResponse(RpcException.SERVER_ERROR);
+      completeWithErrorResponse(new ServerErrorException());
     }
   }
 }
