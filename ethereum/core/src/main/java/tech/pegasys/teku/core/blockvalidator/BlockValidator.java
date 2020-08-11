@@ -49,7 +49,7 @@ public interface BlockValidator {
   }
 
   /** Block validator which just returns OK result without any validations */
-  BlockValidator NOP = new NoOpBlockValidator();
+  BlockValidator NOP = new NopBlockValidator();
 
   /**
    * Validates the block against the state prior to block processing

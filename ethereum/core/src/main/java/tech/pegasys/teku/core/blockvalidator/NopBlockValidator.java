@@ -17,7 +17,7 @@ import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.util.async.SafeFuture;
 
-public class NoOpBlockValidator implements BlockValidator {
+public class NopBlockValidator implements BlockValidator {
 
   @Override
   public SafeFuture<BlockValidationResult> validatePreState(
