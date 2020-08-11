@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.fuzz.input;
 
-import com.google.common.primitives.UnsignedLong;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
@@ -23,6 +22,7 @@ import tech.pegasys.teku.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.BeaconStateImpl;
 import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.ssz.SSZTypes.SSZContainer;
 import tech.pegasys.teku.ssz.sos.SimpleOffsetSerializable;
 
@@ -44,8 +44,7 @@ public class VoluntaryExitFuzzInput implements SimpleOffsetSerializable, SSZCont
     this(
         new BeaconStateImpl(),
         new SignedVoluntaryExit(
-            new VoluntaryExit(UnsignedLong.valueOf(0), UnsignedLong.valueOf(0)),
-            BLSSignature.empty()));
+            new VoluntaryExit(UInt64.valueOf(0), UInt64.valueOf(0)), BLSSignature.empty()));
   }
 
   @Override

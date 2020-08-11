@@ -219,7 +219,8 @@ public class FuzzUtil {
       return Optional.empty();
     }
     // Mask it to make ensure positive before using remainder.
-    int count = ((int) (0xFFFFFFFFL & BeaconStateUtil.bytes_to_int(Bytes.wrap(input, 0, 2)))) % 100;
+    int count =
+        ((int) (0xFFFFFFFFL & BeaconStateUtil.bytes_to_int64(Bytes.wrap(input, 0, 2)))) % 100;
 
     Bytes32 seed = Bytes32.wrap(input, 2);
 
