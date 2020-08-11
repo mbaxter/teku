@@ -13,10 +13,14 @@
 
 package tech.pegasys.teku.networking.p2p.connection;
 
-import com.google.common.primitives.UnsignedLong;
+import static tech.pegasys.teku.networking.p2p.peer.DisconnectReason.TOO_MANY_PEERS;
+import static tech.pegasys.teku.networking.p2p.peer.DisconnectReason.UNRESPONSIVE;
+
+import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.metrics.TekuMetricCategory;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
@@ -26,8 +30,7 @@ import tech.pegasys.teku.util.cache.LRUCache;
 import tech.pegasys.teku.util.time.TimeProvider;
 
 public class ReputationManager {
-  static final UnsignedLong FAILURE_BAN_PERIOD =
-      UnsignedLong.valueOf(TimeUnit.MINUTES.toSeconds(2));
+  static final UInt64 FAILURE_BAN_PERIOD = UInt64.valueOf(TimeUnit.MINUTES.toSeconds(2));
   private final TimeProvider timeProvider;
   private final Cache<NodeId, Reputation> peerReputations;
 
@@ -71,14 +74,24 @@ public class ReputationManager {
   }
 
   private static class Reputation {
-    private volatile Optional<UnsignedLong> lastInitiationFailure = Optional.empty();
+    private static final EnumSet<DisconnectReason> LOCAL_TEMPORARY_DISCONNECT_REASONS =
+        EnumSet.of(
+            // We're currently at limit so don't mark peer unsuitable
+            TOO_MANY_PEERS,
+            // Peer may have been unresponsive due to a temporary network issue. In particular
+            // our internet access may have failed and all peers could be unresponsive.
+            // If we consider them all permanently unsuitable we may not be able to rejoin the
+            // network once our internet access is restored.
+            UNRESPONSIVE);
+
+    private volatile Optional<UInt64> lastInitiationFailure = Optional.empty();
     private volatile boolean unsuitable = false;
 
-    public void reportInitiatedConnectionFailed(final UnsignedLong failureTime) {
+    public void reportInitiatedConnectionFailed(final UInt64 failureTime) {
       lastInitiationFailure = Optional.of(failureTime);
     }
 
-    public boolean shouldInitiateConnection(final UnsignedLong currentTime) {
+    public boolean shouldInitiateConnection(final UInt64 currentTime) {
       return !unsuitable
           && lastInitiationFailure
               .map(
@@ -92,7 +105,7 @@ public class ReputationManager {
     }
 
     public void reportDisconnection(
-        final UnsignedLong disconnectTime,
+        final UInt64 disconnectTime,
         final Optional<DisconnectReason> reason,
         final boolean locallyInitiated) {
       if (isLocallyConsideredUnsuitable(reason, locallyInitiated)
@@ -106,7 +119,7 @@ public class ReputationManager {
     private boolean isLocallyConsideredUnsuitable(
         final Optional<DisconnectReason> reason, final boolean locallyInitiated) {
       return locallyInitiated
-          && reason.map(r -> r != DisconnectReason.TOO_MANY_PEERS).orElse(false);
+          && reason.map(r -> !LOCAL_TEMPORARY_DISCONNECT_REASONS.contains(r)).orElse(false);
     }
   }
 }

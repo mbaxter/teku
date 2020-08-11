@@ -20,6 +20,8 @@ import java.io.File;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.bytes.Bytes48;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -97,7 +99,7 @@ public class DepositRegisterCommand implements Runnable {
     try (final RegisterAction registerAction =
         registerParams.createRegisterAction(verboseOutputParam.isVerboseOutputEnabled())) {
       final BLSPublicKey withdrawalPublicKey =
-          BLSPublicKey.fromBytesCompressed(Bytes.fromHexString(this.withdrawalKey));
+          BLSPublicKey.fromBytesCompressed(Bytes48.fromHexString(this.withdrawalKey));
       registerAction.displayConfirmation(1);
       registerAction.sendDeposit(validatorKey, withdrawalPublicKey).get();
     } catch (final Throwable t) {
@@ -119,7 +121,7 @@ public class DepositRegisterCommand implements Runnable {
           KeyStoreLoader.loadFromFile(
               validatorKeyOptions.validatorKeyStoreOptions.validatorKeystoreFile.toPath());
       final Bytes privateKey = KeyStore.decrypt(keystorePassword, keyStoreData);
-      return privateKeyToKeyPair(privateKey);
+      return privateKeyToKeyPair(Bytes32.wrap(privateKey));
     } catch (final KeyStoreValidationException e) {
       throw new ParameterException(spec.commandLine(), e.getMessage());
     }
@@ -146,10 +148,10 @@ public class DepositRegisterCommand implements Runnable {
   }
 
   private BLSKeyPair privateKeyToKeyPair(final String validatorKey) {
-    return privateKeyToKeyPair(Bytes.fromHexString(validatorKey));
+    return privateKeyToKeyPair(Bytes32.fromHexString(validatorKey));
   }
 
-  private BLSKeyPair privateKeyToKeyPair(final Bytes validatorKey) {
+  private BLSKeyPair privateKeyToKeyPair(final Bytes32 validatorKey) {
     return new BLSKeyPair(BLSSecretKey.fromBytes(validatorKey));
   }
 

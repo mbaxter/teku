@@ -17,8 +17,8 @@ import static tech.pegasys.teku.core.lookup.BlockProvider.fromDynamicMap;
 import static tech.pegasys.teku.core.lookup.BlockProvider.fromMap;
 
 import com.google.common.collect.Sets;
-import com.google.common.primitives.UnsignedLong;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,7 +29,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Function;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import javax.annotation.CheckReturnValue;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,29 +43,25 @@ import tech.pegasys.teku.core.exceptions.EpochProcessingException;
 import tech.pegasys.teku.core.exceptions.SlotProcessingException;
 import tech.pegasys.teku.core.lookup.BlockProvider;
 import tech.pegasys.teku.core.stategenerator.StateGenerator;
-import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.datastructures.forkchoice.InvalidCheckpointException;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.datastructures.hashtree.HashTree;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
-import tech.pegasys.teku.datastructures.state.CheckpointAndBlock;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.metrics.SettableGauge;
 import tech.pegasys.teku.metrics.TekuMetricCategory;
 import tech.pegasys.teku.storage.api.StorageUpdateChannel;
-import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.collections.ConcurrentLimitedMap;
 import tech.pegasys.teku.util.collections.LimitStrategy;
 import tech.pegasys.teku.util.collections.LimitedMap;
 
 class Store implements UpdatableStore {
   private static final Logger LOG = LogManager.getLogger();
-
-  private static final SafeFuture<Optional<BeaconState>> EMPTY_STATE_FUTURE =
-      SafeFuture.completedFuture(Optional.empty());
-  private static final SafeFuture<Optional<SignedBeaconBlock>> EMPTY_BLOCK_FUTURE =
-      SafeFuture.completedFuture(Optional.empty());
 
   private final ReadWriteLock lock = new ReentrantReadWriteLock();
   private final Lock readLock = lock.readLock();
@@ -75,33 +72,40 @@ class Store implements UpdatableStore {
   private final Counter checkpointStateRequestRegenerateCounter;
   private final Counter checkpointStateRequestMissCounter;
   private final MetricsSystem metricsSystem;
+  private Optional<SettableGauge> stateCountGauge = Optional.empty();
+  private Optional<SettableGauge> blockCountGauge = Optional.empty();
+  private Optional<SettableGauge> checkpointCountGauge = Optional.empty();
 
   private final BlockProvider blockProvider;
 
   HashTree blockTree;
-  UnsignedLong time;
-  UnsignedLong genesis_time;
+  UInt64 time;
+  UInt64 genesis_time;
   Checkpoint justified_checkpoint;
   Checkpoint finalized_checkpoint;
   Checkpoint best_justified_checkpoint;
   Map<Bytes32, SignedBeaconBlock> blocks;
   Map<Bytes32, BeaconState> block_states;
   Map<Checkpoint, BeaconState> checkpoint_states;
-  Map<UnsignedLong, VoteTracker> votes;
+  Map<UInt64, VoteTracker> votes;
   SignedBlockAndState finalizedBlockAndState;
 
-  Store(
+  private Store(
       final MetricsSystem metricsSystem,
       final BlockProvider blockProvider,
-      final UnsignedLong time,
-      final UnsignedLong genesis_time,
+      final UInt64 time,
+      final UInt64 genesis_time,
       final Checkpoint justified_checkpoint,
       final Checkpoint finalized_checkpoint,
       final Checkpoint best_justified_checkpoint,
-      final Map<Bytes32, Bytes32> childToParentRoot,
+      final HashTree blockTree,
       final SignedBlockAndState finalizedBlockAndState,
-      final Map<UnsignedLong, VoteTracker> votes,
-      final StorePruningOptions pruningOptions) {
+      final Map<UInt64, VoteTracker> votes,
+      final Map<Bytes32, SignedBeaconBlock> blocks,
+      final Map<Bytes32, BeaconState> block_states,
+      final Map<Checkpoint, BeaconState> checkpoint_states) {
+
+    // Set up metrics
     this.metricsSystem = metricsSystem;
     final LabelledMetric<Counter> stateRequestCounter =
         metricsSystem.createLabelledCounter(
@@ -122,32 +126,23 @@ class Store implements UpdatableStore {
     checkpointStateRequestRegenerateCounter = checkpointStateRequestCounter.labels("regenerate");
     checkpointStateRequestMissCounter = checkpointStateRequestCounter.labels("miss");
 
+    // Store instance variables
     this.time = time;
     this.genesis_time = genesis_time;
     this.justified_checkpoint = justified_checkpoint;
     this.finalized_checkpoint = finalized_checkpoint;
     this.best_justified_checkpoint = best_justified_checkpoint;
-    this.blocks =
-        ConcurrentLimitedMap.create(
-            pruningOptions.getBlockCacheSize(), LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
-    this.block_states =
-        LimitedMap.create(
-            pruningOptions.getStateCacheSize(), LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
-    this.checkpoint_states =
-        LimitedMap.create(
-            pruningOptions.getCheckpointStateCacheSize(),
-            LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
+    this.blocks = blocks;
+    this.block_states = block_states;
+    this.checkpoint_states = checkpoint_states;
     this.votes = new ConcurrentHashMap<>(votes);
-
-    // Build block tree structure
-    HashTree.Builder treeBuilder = HashTree.builder().rootHash(finalizedBlockAndState.getRoot());
-    childToParentRoot.forEach(treeBuilder::childAndParentRoots);
-    this.blockTree = treeBuilder.build();
+    this.blockTree = blockTree;
 
     // Track latest finalized block
     this.finalizedBlockAndState = finalizedBlockAndState;
     putBlockState(finalizedBlockAndState.getRoot(), finalizedBlockAndState.getState());
 
+    // Set up block provider to draw from in-memory blocks
     this.blockProvider =
         BlockProvider.combined(
             fromDynamicMap(
@@ -157,10 +152,37 @@ class Store implements UpdatableStore {
                 }),
             fromMap(this.blocks),
             blockProvider);
+  }
 
-    // Create state generator
-    final StateGenerator stateGenerator =
-        StateGenerator.create(blockTree, finalizedBlockAndState, this.blockProvider);
+  public static SafeFuture<UpdatableStore> create(
+      final MetricsSystem metricsSystem,
+      final BlockProvider blockProvider,
+      final UInt64 time,
+      final UInt64 genesisTime,
+      final Checkpoint justifiedCheckpoint,
+      final Checkpoint finalizedCheckpoint,
+      final Checkpoint bestJustifiedCheckpoint,
+      final Map<Bytes32, Bytes32> childToParentRoot,
+      final SignedBlockAndState finalizedBlockAndState,
+      final Map<UInt64, VoteTracker> votes,
+      final StorePruningOptions pruningOptions) {
+
+    // Create limited collections for non-final data
+    final Map<Bytes32, SignedBeaconBlock> blocks =
+        ConcurrentLimitedMap.create(
+            pruningOptions.getBlockCacheSize(), LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
+    final Map<Bytes32, BeaconState> blockStates =
+        LimitedMap.create(
+            pruningOptions.getStateCacheSize(), LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
+    final Map<Checkpoint, BeaconState> checkpointStates =
+        LimitedMap.create(
+            pruningOptions.getCheckpointStateCacheSize(),
+            LimitStrategy.DROP_LEAST_RECENTLY_ACCESSED);
+
+    // Build block tree structure
+    HashTree.Builder treeBuilder = HashTree.builder().rootHash(finalizedBlockAndState.getRoot());
+    childToParentRoot.forEach(treeBuilder::childAndParentRoots);
+    final HashTree blockTree = treeBuilder.build();
     if (blockTree.size() < childToParentRoot.size()) {
       // This should be an error, but keeping this as a warning now for backwards-compatibility
       // reasons.  Some existing databases may have unpruned fork blocks, and could become
@@ -169,22 +191,47 @@ class Store implements UpdatableStore {
       LOG.warn("Ignoring {} non-canonical blocks", childToParentRoot.size() - blockTree.size());
     }
 
+    // Create state generator
+    final BlockProvider blockProviderWithBlocks =
+        BlockProvider.combined(
+            fromMap(Map.of(finalizedBlockAndState.getRoot(), finalizedBlockAndState.getBlock())),
+            fromMap(blocks),
+            blockProvider);
+    final StateGenerator stateGenerator =
+        StateGenerator.create(blockTree, finalizedBlockAndState, blockProviderWithBlocks);
+
     // Process blocks
     LOG.info("Process {} block(s) to regenerate state", blockTree.size());
     final AtomicInteger processedBlocks = new AtomicInteger(0);
-    // TODO(#2291) - handle future properly
-    stateGenerator
+    return stateGenerator
         .regenerateAllStates(
             (block, state) -> {
               final int processed = processedBlocks.incrementAndGet();
               if (processed % 100 == 0) {
                 LOG.info("Processed {} blocks", processed);
               }
-              putBlock(block);
-              putBlockState(block.getRoot(), state);
+              blocks.put(block.getRoot(), block);
+              blockStates.put(block.getRoot(), state);
             })
-        .join();
-    LOG.info("Finished processing {} block(s)", blockTree.size());
+        .thenApply(
+            __ -> {
+              LOG.info("Finished processing {} block(s)", blockTree.size());
+
+              return new Store(
+                  metricsSystem,
+                  blockProvider,
+                  time,
+                  genesisTime,
+                  justifiedCheckpoint,
+                  finalizedCheckpoint,
+                  bestJustifiedCheckpoint,
+                  blockTree,
+                  finalizedBlockAndState,
+                  votes,
+                  blocks,
+                  blockStates,
+                  checkpointStates);
+            });
   }
 
   /**
@@ -195,21 +242,32 @@ class Store implements UpdatableStore {
    */
   @Override
   public void startMetrics() {
-    metricsSystem.createIntegerGauge(
-        TekuMetricCategory.STORAGE,
-        "memory_state_count",
-        "Number of beacon states held in the in-memory store",
-        this::countStates);
-    metricsSystem.createIntegerGauge(
-        TekuMetricCategory.STORAGE,
-        "memory_block_count",
-        "Number of beacon blocks held in the in-memory store",
-        this::countBlocks);
-    metricsSystem.createIntegerGauge(
-        TekuMetricCategory.STORAGE,
-        "memory_checkpoint_state_count",
-        "Number of checkpoint states held in the in-memory store",
-        this::countCheckpointStates);
+    lock.writeLock().lock();
+    try {
+      stateCountGauge =
+          Optional.of(
+              SettableGauge.create(
+                  metricsSystem,
+                  TekuMetricCategory.STORAGE,
+                  "memory_state_count",
+                  "Number of beacon states held in the in-memory store"));
+      blockCountGauge =
+          Optional.of(
+              SettableGauge.create(
+                  metricsSystem,
+                  TekuMetricCategory.STORAGE,
+                  "memory_block_count",
+                  "Number of beacon blocks held in the in-memory store"));
+      checkpointCountGauge =
+          Optional.of(
+              SettableGauge.create(
+                  metricsSystem,
+                  TekuMetricCategory.STORAGE,
+                  "memory_checkpoint_state_count",
+                  "Number of checkpoint states held in the in-memory store"));
+    } finally {
+      lock.writeLock().unlock();
+    }
   }
 
   @Override
@@ -224,7 +282,7 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public UnsignedLong getTime() {
+  public UInt64 getTime() {
     readLock.lock();
     try {
       return time;
@@ -234,7 +292,7 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public UnsignedLong getGenesisTime() {
+  public UInt64 getGenesisTime() {
     readLock.lock();
     try {
       return genesis_time;
@@ -264,18 +322,6 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public CheckpointAndBlock getFinalizedCheckpointAndBlock() {
-    readLock.lock();
-    try {
-      final Checkpoint checkpoint = finalized_checkpoint;
-      final SignedBeaconBlock block = finalizedBlockAndState.getBlock();
-      return new CheckpointAndBlock(checkpoint, block);
-    } finally {
-      readLock.unlock();
-    }
-  }
-
-  @Override
   public SignedBlockAndState getLatestFinalizedBlockAndState() {
     readLock.lock();
     try {
@@ -286,7 +332,7 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public UnsignedLong getLatestFinalizedBlockSlot() {
+  public UInt64 getLatestFinalizedBlockSlot() {
     readLock.lock();
     try {
       return finalizedBlockAndState.getSlot();
@@ -303,30 +349,6 @@ class Store implements UpdatableStore {
     } finally {
       readLock.unlock();
     }
-  }
-
-  @Override
-  public BeaconBlock getBlock(Bytes32 blockRoot) {
-    final SignedBeaconBlock signedBlock = getSignedBlock(blockRoot);
-    return signedBlock != null ? signedBlock.getMessage() : null;
-  }
-
-  @Override
-  public SignedBeaconBlock getSignedBlock(Bytes32 blockRoot) {
-    // TODO(#2291) - handle future
-    return retrieveSignedBlock(blockRoot).join().orElse(null);
-  }
-
-  @Override
-  public Optional<SignedBlockAndState> getBlockAndState(final Bytes32 blockRoot) {
-    final SignedBeaconBlock block = getSignedBlock(blockRoot);
-    if (block == null) {
-      return Optional.empty();
-    }
-    // TODO(#2291) - handle future properly
-    return getOrGenerateBlockState(blockRoot)
-        .join()
-        .map((state) -> new SignedBlockAndState(block, state));
   }
 
   @Override
@@ -350,9 +372,13 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public BeaconState getBlockState(Bytes32 blockRoot) {
-    // TODO(#2291) - handle future properly
-    return getOrGenerateBlockState(blockRoot).join().orElse(null);
+  public List<Bytes32> getOrderedBlockRoots() {
+    readLock.lock();
+    try {
+      return blockTree.breadthFirstStream().collect(Collectors.toList());
+    } finally {
+      readLock.unlock();
+    }
   }
 
   @Override
@@ -378,25 +404,51 @@ class Store implements UpdatableStore {
   }
 
   @Override
-  public Optional<BeaconState> getCheckpointState(Checkpoint checkpoint) {
-    return getCheckpointStateIfAvailable(checkpoint)
-        .or(() -> regenerateAndStoreCheckpointState(checkpoint));
+  public SafeFuture<Optional<SignedBeaconBlock>> retrieveSignedBlock(final Bytes32 blockRoot) {
+    if (!containsBlock(blockRoot)) {
+      return EmptyStoreResults.EMPTY_SIGNED_BLOCK_FUTURE;
+    }
+    final Optional<SignedBeaconBlock> inMemoryBlock = getBlockIfAvailable(blockRoot);
+    if (inMemoryBlock.isPresent()) {
+      return SafeFuture.completedFuture(inMemoryBlock);
+    }
+
+    // Retrieve and cache block
+    return blockProvider
+        .getBlock(blockRoot)
+        .thenApply(
+            block -> {
+              block.ifPresent(this::putBlock);
+              return block;
+            });
   }
 
-  private Optional<? extends BeaconState> regenerateAndStoreCheckpointState(
-      final Checkpoint checkpoint) {
-    final Optional<BeaconState> checkpointState =
-        regenerateCheckpointState(checkpoint, this::getBlockState);
-    checkpointState.ifPresent(
-        state -> {
-          lock.writeLock().lock();
-          try {
-            checkpoint_states.put(checkpoint, state);
-          } finally {
-            lock.writeLock().unlock();
-          }
-        });
-    return checkpointState;
+  @Override
+  public SafeFuture<Optional<SignedBlockAndState>> retrieveBlockAndState(Bytes32 blockRoot) {
+    return getAndCacheBlockAndState(blockRoot);
+  }
+
+  @Override
+  public SafeFuture<Optional<BeaconState>> retrieveBlockState(Bytes32 blockRoot) {
+    return getAndCacheBlockState(blockRoot);
+  }
+
+  @Override
+  public SafeFuture<Optional<BeaconState>> retrieveCheckpointState(Checkpoint checkpoint) {
+    Optional<BeaconState> inMemoryCheckpoint = getCheckpointStateIfAvailable(checkpoint);
+    if (inMemoryCheckpoint.isPresent()) {
+      return SafeFuture.completedFuture(inMemoryCheckpoint);
+    }
+    return retrieveBlockState(checkpoint.getRoot())
+        .thenApply(
+            state ->
+                state.map(
+                    baseState -> {
+                      final BeaconState checkpointState =
+                          regenerateCheckpointState(checkpoint, baseState);
+                      putCheckpointState(checkpoint, checkpointState);
+                      return checkpointState;
+                    }));
   }
 
   private Optional<BeaconState> getCheckpointStateIfAvailable(final Checkpoint checkpoint) {
@@ -415,24 +467,22 @@ class Store implements UpdatableStore {
     }
   }
 
-  private Optional<BeaconState> regenerateCheckpointState(
-      final Checkpoint checkpoint, Function<Bytes32, BeaconState> getBlockState) {
+  private BeaconState regenerateCheckpointState(
+      final Checkpoint checkpoint, BeaconState baseState) {
     try {
-      final BeaconState baseState = getBlockState.apply(checkpoint.getRoot());
-      if (baseState == null || baseState.getSlot().equals(checkpoint.getEpochStartSlot())) {
-        return Optional.ofNullable(baseState);
+      if (baseState.getSlot().equals(checkpoint.getEpochStartSlot())) {
+        return baseState;
       }
 
       checkpointStateRequestRegenerateCounter.inc();
-      return Optional.of(
-          new StateTransition().process_slots(baseState, checkpoint.getEpochStartSlot()));
+      return new StateTransition().process_slots(baseState, checkpoint.getEpochStartSlot());
     } catch (SlotProcessingException | EpochProcessingException | IllegalArgumentException e) {
       throw new InvalidCheckpointException(e);
     }
   }
 
   @Override
-  public Set<UnsignedLong> getVotedValidatorIndices() {
+  public Set<UInt64> getVotedValidatorIndices() {
     readLock.lock();
     try {
       return votes.keySet();
@@ -441,33 +491,25 @@ class Store implements UpdatableStore {
     }
   }
 
-  private SafeFuture<Optional<SignedBeaconBlock>> retrieveSignedBlock(final Bytes32 blockRoot) {
-    if (!containsBlock(blockRoot)) {
-      return EMPTY_BLOCK_FUTURE;
-    }
-    final Optional<SignedBeaconBlock> inMemoryBlock = getBlockIfAvailable(blockRoot);
-    if (inMemoryBlock.isPresent()) {
-      return SafeFuture.completedFuture(inMemoryBlock);
-    }
-
-    // Retrieve and cache block
-    return blockProvider
-        .getBlock(blockRoot)
-        .thenApply(
-            block -> {
-              block.ifPresent(this::putBlock);
-              return block;
-            });
-  }
-
-  private SafeFuture<Optional<BeaconState>> getOrGenerateBlockState(final Bytes32 blockRoot) {
+  private SafeFuture<Optional<BeaconState>> getAndCacheBlockState(final Bytes32 blockRoot) {
     Optional<BeaconState> inMemoryState = getBlockStateIfAvailable(blockRoot);
     if (inMemoryState.isPresent()) {
       return SafeFuture.completedFuture(inMemoryState);
     }
+    return regenerateState(blockRoot, this::cacheState)
+        .thenApply(res -> res.map(SignedBlockAndState::getState));
+  }
+
+  private SafeFuture<Optional<SignedBlockAndState>> getAndCacheBlockAndState(
+      final Bytes32 blockRoot) {
+    return regenerateState(blockRoot, this::cacheBlockAndState);
+  }
+
+  private SafeFuture<Optional<SignedBlockAndState>> regenerateState(
+      final Bytes32 blockRoot, final Consumer<SignedBlockAndState> cacheHandler) {
     if (!containsBlock(blockRoot)) {
       // If we don't have the corresponding block, we can't possibly regenerate the state
-      return EMPTY_STATE_FUTURE;
+      return EmptyStoreResults.EMPTY_BLOCK_AND_STATE_FUTURE;
     }
 
     // Accumulate blocks hashes until we find our base state to build from
@@ -501,7 +543,7 @@ class Store implements UpdatableStore {
       final SignedBlockAndState finalized = getLatestFinalizedBlockAndState();
       if (!treeBuilder.contains(finalized.getRoot())) {
         // We must have finalized a new block while processing and moved past our target root
-        return EMPTY_STATE_FUTURE;
+        return EmptyStoreResults.EMPTY_BLOCK_AND_STATE_FUTURE;
       }
       baseBlockRoot.set(finalized.getRoot());
       baseState.set(finalized.getState());
@@ -525,13 +567,32 @@ class Store implements UpdatableStore {
                       return stateGenerator
                           .regenerateStateForBlock(blockRoot)
                           .thenApply(
-                              regeneratedState -> {
+                              result -> {
                                 stateRequestRegenerateCounter.inc();
-                                putBlockState(blockRoot, regeneratedState);
-                                return Optional.of(regeneratedState);
+                                cacheHandler.accept(result);
+                                return Optional.of(result);
                               });
                     })
-                .orElse(EMPTY_STATE_FUTURE));
+                .orElse(EmptyStoreResults.EMPTY_BLOCK_AND_STATE_FUTURE));
+  }
+
+  private void cacheBlockAndState(final SignedBlockAndState blockAndState) {
+    putBlockState(blockAndState.getRoot(), blockAndState.getState());
+    putBlock(blockAndState.getBlock());
+  }
+
+  private void cacheState(final SignedBlockAndState blockAndState) {
+    putBlockState(blockAndState.getRoot(), blockAndState.getState());
+  }
+
+  private void putCheckpointState(final Checkpoint checkpoint, final BeaconState state) {
+    lock.writeLock().lock();
+    try {
+      checkpoint_states.put(checkpoint, state);
+      checkpointCountGauge.ifPresent(gauge -> gauge.set(checkpoint_states.size()));
+    } finally {
+      lock.writeLock().unlock();
+    }
   }
 
   private void putBlockState(final Bytes32 blockRoot, final BeaconState state) {
@@ -540,6 +601,7 @@ class Store implements UpdatableStore {
     try {
       if (containsBlock(blockRoot)) {
         block_states.put(blockRoot, state);
+        stateCountGauge.ifPresent(gauge -> gauge.set(block_states.size()));
       }
     } finally {
       writeLock.unlock();
@@ -552,51 +614,25 @@ class Store implements UpdatableStore {
     try {
       if (containsBlock(block.getRoot())) {
         blocks.put(block.getRoot(), block);
+        blockCountGauge.ifPresent(gauge -> gauge.set(blocks.size()));
       }
     } finally {
       writeLock.unlock();
     }
   }
 
-  private int countBlocks() {
-    readLock.lock();
-    try {
-      return blocks.size();
-    } finally {
-      readLock.unlock();
-    }
-  }
-
-  private int countStates() {
-    readLock.lock();
-    try {
-      return block_states.size();
-    } finally {
-      readLock.unlock();
-    }
-  }
-
-  private int countCheckpointStates() {
-    readLock.lock();
-    try {
-      return checkpoint_states.size();
-    } finally {
-      readLock.unlock();
-    }
-  }
-
   class Transaction implements StoreTransaction {
 
     private final StorageUpdateChannel storageUpdateChannel;
-    Optional<UnsignedLong> time = Optional.empty();
-    Optional<UnsignedLong> genesis_time = Optional.empty();
+    Optional<UInt64> time = Optional.empty();
+    Optional<UInt64> genesis_time = Optional.empty();
     Optional<Checkpoint> justified_checkpoint = Optional.empty();
     Optional<Checkpoint> finalized_checkpoint = Optional.empty();
     Optional<Checkpoint> best_justified_checkpoint = Optional.empty();
+    Map<Bytes32, SlotAndBlockRoot> stateRoots = new HashMap<>();
     Map<Bytes32, SignedBeaconBlock> blocks = new HashMap<>();
     Map<Bytes32, BeaconState> block_states = new HashMap<>();
-    Map<UnsignedLong, VoteTracker> votes = new ConcurrentHashMap<>();
-    Map<Checkpoint, BeaconState> checkpointStateCache = new HashMap<>();
+    Map<UInt64, VoteTracker> votes = new ConcurrentHashMap<>();
     private final StoreUpdateHandler updateHandler;
 
     Transaction(
@@ -609,15 +645,23 @@ class Store implements UpdatableStore {
     public void putBlockAndState(SignedBeaconBlock block, BeaconState state) {
       blocks.put(block.getRoot(), block);
       block_states.put(block.getRoot(), state);
+      putStateRoot(
+          state.hash_tree_root(),
+          new SlotAndBlockRoot(block.getSlot(), block.getMessage().hash_tree_root()));
     }
 
     @Override
-    public void setTime(UnsignedLong time) {
+    public void putStateRoot(final Bytes32 stateRoot, final SlotAndBlockRoot slotAndBlockRoot) {
+      stateRoots.put(stateRoot, slotAndBlockRoot);
+    }
+
+    @Override
+    public void setTime(UInt64 time) {
       this.time = Optional.of(time);
     }
 
     @Override
-    public void setGenesis_time(UnsignedLong genesis_time) {
+    public void setGenesis_time(UInt64 genesis_time) {
       this.genesis_time = Optional.of(genesis_time);
     }
 
@@ -637,7 +681,7 @@ class Store implements UpdatableStore {
     }
 
     @Override
-    public VoteTracker getVote(UnsignedLong validatorIndex) {
+    public VoteTracker getVote(UInt64 validatorIndex) {
       VoteTracker vote = votes.get(validatorIndex);
       if (vote == null) {
         vote = Store.this.votes.get(validatorIndex);
@@ -659,7 +703,7 @@ class Store implements UpdatableStore {
       final Lock writeLock = Store.this.lock.writeLock();
       writeLock.lock();
       try {
-        updates = StoreTransactionUpdates.calculate(Store.this, this);
+        updates = StoreTransactionUpdatesFactory.create(Store.this, this).join();
       } finally {
         writeLock.unlock();
       }
@@ -688,12 +732,12 @@ class Store implements UpdatableStore {
     }
 
     @Override
-    public UnsignedLong getTime() {
+    public UInt64 getTime() {
       return time.orElseGet(Store.this::getTime);
     }
 
     @Override
-    public UnsignedLong getGenesisTime() {
+    public UInt64 getGenesisTime() {
       return genesis_time.orElseGet(Store.this::getGenesisTime);
     }
 
@@ -708,52 +752,23 @@ class Store implements UpdatableStore {
     }
 
     @Override
-    public CheckpointAndBlock getFinalizedCheckpointAndBlock() {
-      return finalized_checkpoint
-          .flatMap(
-              (checkpoint) ->
-                  Optional.ofNullable(getSignedBlock(checkpoint.getRoot()))
-                      .map(block -> new CheckpointAndBlock(checkpoint, block)))
-          .orElse(Store.this.getFinalizedCheckpointAndBlock());
-    }
-
-    @Override
     public SignedBlockAndState getLatestFinalizedBlockAndState() {
-      return finalized_checkpoint
-          .map(Checkpoint::getRoot)
-          .flatMap(this::getBlockAndState)
-          .orElse(Store.this.getLatestFinalizedBlockAndState());
+      if (finalized_checkpoint.isPresent()) {
+        // Ideally we wouldn't join here - but seems not worth making this API async since we're
+        // unlikely to call this on tx objects
+        return retrieveBlockAndState(finalized_checkpoint.get().getRoot()).join().orElseThrow();
+      }
+      return Store.this.getLatestFinalizedBlockAndState();
     }
 
     @Override
-    public UnsignedLong getLatestFinalizedBlockSlot() {
+    public UInt64 getLatestFinalizedBlockSlot() {
       return getLatestFinalizedBlockAndState().getSlot();
     }
 
     @Override
     public Checkpoint getBestJustifiedCheckpoint() {
       return best_justified_checkpoint.orElseGet(Store.this::getBestJustifiedCheckpoint);
-    }
-
-    @Override
-    public BeaconBlock getBlock(final Bytes32 blockRoot) {
-      final SignedBeaconBlock signedBlock = getSignedBlock(blockRoot);
-      return signedBlock != null ? signedBlock.getMessage() : null;
-    }
-
-    @Override
-    public SignedBeaconBlock getSignedBlock(final Bytes32 blockRoot) {
-      return either(blockRoot, blocks::get, Store.this::getSignedBlock);
-    }
-
-    @Override
-    public Optional<SignedBlockAndState> getBlockAndState(final Bytes32 blockRoot) {
-      final SignedBeaconBlock block = getSignedBlock(blockRoot);
-      final BeaconState state = getBlockState(blockRoot);
-      if (block == null || state == null) {
-        return Optional.empty();
-      }
-      return Optional.of(new SignedBlockAndState(block, state));
     }
 
     @Override
@@ -767,8 +782,19 @@ class Store implements UpdatableStore {
     }
 
     @Override
-    public BeaconState getBlockState(final Bytes32 blockRoot) {
-      return either(blockRoot, block_states::get, Store.this::getBlockState);
+    public List<Bytes32> getOrderedBlockRoots() {
+      if (this.blocks.isEmpty()) {
+        return Store.this.getOrderedBlockRoots();
+      }
+
+      Store.this.lock.readLock().lock();
+      try {
+        final HashTree.Builder treeBuilder = Store.this.blockTree.updater();
+        this.blocks.values().forEach(treeBuilder::block);
+        return treeBuilder.build().breadthFirstStream().collect(Collectors.toList());
+      } finally {
+        Store.this.lock.readLock().unlock();
+      }
     }
 
     @Override
@@ -778,26 +804,50 @@ class Store implements UpdatableStore {
     }
 
     @Override
+    public SafeFuture<Optional<SignedBeaconBlock>> retrieveSignedBlock(Bytes32 blockRoot) {
+      if (blocks.containsKey(blockRoot)) {
+        return SafeFuture.completedFuture(Optional.of(blocks.get(blockRoot)));
+      }
+      return Store.this.retrieveSignedBlock(blockRoot);
+    }
+
+    @Override
+    public SafeFuture<Optional<SignedBlockAndState>> retrieveBlockAndState(Bytes32 blockRoot) {
+      if (blocks.containsKey(blockRoot)) {
+        final SignedBlockAndState result =
+            new SignedBlockAndState(blocks.get(blockRoot), block_states.get(blockRoot));
+        return SafeFuture.completedFuture(Optional.of(result));
+      }
+      return Store.this.retrieveBlockAndState(blockRoot);
+    }
+
+    @Override
+    public SafeFuture<Optional<BeaconState>> retrieveBlockState(Bytes32 blockRoot) {
+      if (block_states.containsKey(blockRoot)) {
+        return SafeFuture.completedFuture(Optional.of(block_states.get(blockRoot)));
+      }
+      return Store.this.retrieveBlockState(blockRoot);
+    }
+
+    @Override
+    public SafeFuture<Optional<BeaconState>> retrieveCheckpointState(Checkpoint checkpoint) {
+      BeaconState inMemoryCheckpointBlockState = block_states.get(checkpoint.getRoot());
+      if (inMemoryCheckpointBlockState != null) {
+        return SafeFuture.completedFuture(
+            Optional.of(regenerateCheckpointState(checkpoint, inMemoryCheckpointBlockState)));
+      }
+      return Store.this.retrieveCheckpointState(checkpoint);
+    }
+
+    @Override
     public Optional<SignedBeaconBlock> getBlockIfAvailable(final Bytes32 blockRoot) {
       return Optional.ofNullable(blocks.get(blockRoot))
           .or(() -> Store.this.getBlockIfAvailable(blockRoot));
     }
 
     @Override
-    public Set<UnsignedLong> getVotedValidatorIndices() {
+    public Set<UInt64> getVotedValidatorIndices() {
       return Sets.union(votes.keySet(), Store.this.getVotedValidatorIndices());
-    }
-
-    private <I, O> O either(I input, Function<I, O> primary, Function<I, O> secondary) {
-      final O primaryValue = primary.apply(input);
-      return primaryValue != null ? primaryValue : secondary.apply(input);
-    }
-
-    @Override
-    public Optional<BeaconState> getCheckpointState(final Checkpoint checkpoint) {
-      return Optional.ofNullable(checkpointStateCache.get(checkpoint))
-          .or(() -> Store.this.getCheckpointStateIfAvailable(checkpoint))
-          .or(() -> regenerateCheckpointState(checkpoint, this::getBlockState));
     }
   }
 

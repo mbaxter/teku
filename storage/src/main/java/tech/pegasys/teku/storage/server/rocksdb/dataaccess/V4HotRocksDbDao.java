@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.storage.server.rocksdb.dataaccess;
 
-import com.google.common.primitives.UnsignedLong;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.util.List;
 import java.util.Map;
@@ -22,13 +21,14 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
 import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.protoarray.ProtoArraySnapshot;
-import tech.pegasys.teku.storage.api.schema.SlotAndBlockRoot;
 import tech.pegasys.teku.storage.server.rocksdb.core.ColumnEntry;
 import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbAccessor;
 import tech.pegasys.teku.storage.server.rocksdb.core.RocksDbAccessor.RocksDbTransaction;
@@ -43,7 +43,7 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
   }
 
   @Override
-  public Optional<UnsignedLong> getGenesisTime() {
+  public Optional<UInt64> getGenesisTime() {
     return db.get(V4SchemaHot.GENESIS_TIME);
   }
 
@@ -84,7 +84,7 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
   }
 
   @Override
-  public List<Bytes32> getStateRootsBeforeSlot(final UnsignedLong slot) {
+  public List<Bytes32> getStateRootsBeforeSlot(final UInt64 slot) {
     try (Stream<ColumnEntry<Bytes32, SlotAndBlockRoot>> stream =
         db.stream(V4SchemaHot.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT)) {
       return stream
@@ -100,7 +100,7 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
   }
 
   @Override
-  public Map<UnsignedLong, VoteTracker> getVotes() {
+  public Map<UInt64, VoteTracker> getVotes() {
     return db.getAll(V4SchemaHot.VOTES);
   }
 
@@ -152,7 +152,7 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
     }
 
     @Override
-    public void setGenesisTime(final UnsignedLong genesisTime) {
+    public void setGenesisTime(final UInt64 genesisTime) {
       transaction.put(V4SchemaHot.GENESIS_TIME, genesisTime);
     }
 
@@ -188,8 +188,12 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
     }
 
     @Override
-    public void addHotStateRoot(final Bytes32 stateRoot, final SlotAndBlockRoot slotAndBlockRoot) {
-      transaction.put(V4SchemaHot.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT, stateRoot, slotAndBlockRoot);
+    public void addHotStateRoots(
+        final Map<Bytes32, SlotAndBlockRoot> stateRootToSlotAndBlockRootMap) {
+      stateRootToSlotAndBlockRootMap.forEach(
+          (stateRoot, slotAndBlockRoot) ->
+              transaction.put(
+                  V4SchemaHot.STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT, stateRoot, slotAndBlockRoot));
     }
 
     @Override
@@ -200,7 +204,7 @@ public class V4HotRocksDbDao implements RocksDbHotDao, RocksDbEth1Dao, RocksDbPr
     }
 
     @Override
-    public void addVotes(final Map<UnsignedLong, VoteTracker> votes) {
+    public void addVotes(final Map<UInt64, VoteTracker> votes) {
       votes.forEach(
           (validatorIndex, vote) -> transaction.put(V4SchemaHot.VOTES, validatorIndex, vote));
     }

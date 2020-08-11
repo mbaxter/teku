@@ -78,6 +78,10 @@ public class StatusLogger {
     log.error(message, file.toString(), cause);
   }
 
+  public void loadingValidators(final int validatorCount) {
+    log.info("Loading {} validator keys...", validatorCount);
+  }
+
   public void validatorsInitialised(final List<String> validators) {
     if (validators.size() > 100) {
       log.info("Loaded {} validators", validators.size());
@@ -94,6 +98,14 @@ public class StatusLogger {
     log.info("Initializing storage");
   }
 
+  public void fatalErrorInitialisingStorage(Throwable err) {
+    log.debug("Failed to intiailize storage", err);
+    log.fatal(
+        "Failed to initialize storage. "
+            + "Check the existing database matches the current network configuration. "
+            + "Set log level to debug for more information.");
+  }
+
   public void finishInitializingChainData() {
     log.info("Storage initialization complete");
   }
@@ -105,10 +117,11 @@ public class StatusLogger {
         () -> size);
   }
 
-  public void timeUntilGenesis(final long timeToGenesis) {
+  public void timeUntilGenesis(final long timeToGenesis, final int peerCount) {
     log.info(
-        "{} until genesis time is reached",
-        () -> DurationFormatUtils.formatDurationWords(timeToGenesis * 1000, true, true));
+        "{} until genesis time is reached. Peers: {}",
+        () -> DurationFormatUtils.formatDurationWords(timeToGenesis * 1000, true, true),
+        () -> peerCount);
   }
 
   public void loadingGenesisFile(final String genesisFile) {

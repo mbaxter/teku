@@ -27,7 +27,6 @@ import static tech.pegasys.teku.util.config.Constants.ATTESTATION_SUBNET_COUNT;
 import static tech.pegasys.teku.util.config.Constants.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.util.config.Constants.GENESIS_FORK_VERSION;
 
-import com.google.common.primitives.UnsignedLong;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.Optional;
@@ -44,6 +43,9 @@ import tech.pegasys.teku.datastructures.state.Fork;
 import tech.pegasys.teku.datastructures.state.ForkInfo;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
 import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
+import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.network.p2p.peer.SimplePeerSelectionStrategy;
 import tech.pegasys.teku.networking.p2p.connection.ConnectionManager;
 import tech.pegasys.teku.networking.p2p.connection.TargetPeerRange;
@@ -54,8 +56,6 @@ import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.ssz.SSZTypes.Bitvector;
 import tech.pegasys.teku.ssz.SSZTypes.Bytes4;
-import tech.pegasys.teku.util.async.DelayedExecutorAsyncRunner;
-import tech.pegasys.teku.util.async.SafeFuture;
 
 class DiscoveryNetworkTest {
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil();
@@ -151,7 +151,8 @@ class DiscoveryNetworkTest {
             Collections.emptyList(),
             false,
             Collections.emptyList(),
-            new TargetPeerRange(20, 30, 0));
+            new TargetPeerRange(20, 30, 0),
+            2);
     final DiscoveryNetwork<Peer> network =
         DiscoveryNetwork.create(
             new NoOpMetricsSystem(),
@@ -211,15 +212,13 @@ class DiscoveryNetworkTest {
 
     final EnrForkId newEnrForkId1 =
         new EnrForkId(
-            currentForkInfo.getForkDigest(), Bytes4.fromHexString("0xdeadbeef"), UnsignedLong.ZERO);
+            currentForkInfo.getForkDigest(), Bytes4.fromHexString("0xdeadbeef"), UInt64.ZERO);
     DiscoveryPeer peer2 = createDiscoveryPeer(Optional.of(newEnrForkId1));
     assertThat(peerPredicateArgumentCaptor.getValue().test(peer2)).isTrue();
 
     final EnrForkId newEnrForkId2 =
         new EnrForkId(
-            Bytes4.fromHexString("0xdeadbeef"),
-            Bytes4.fromHexString("0xdeadbeef"),
-            UnsignedLong.ZERO);
+            Bytes4.fromHexString("0xdeadbeef"), Bytes4.fromHexString("0xdeadbeef"), UInt64.ZERO);
     DiscoveryPeer peer3 = createDiscoveryPeer(Optional.of(newEnrForkId2));
     assertThat(peerPredicateArgumentCaptor.getValue().test(peer3)).isFalse();
   }
@@ -276,7 +275,7 @@ class DiscoveryNetworkTest {
 
   public DiscoveryPeer createDiscoveryPeer(Optional<EnrForkId> maybeForkId) {
     return new DiscoveryPeer(
-        BLSPublicKey.empty().toBytes(),
+        BLSPublicKey.empty().toSSZBytes(),
         InetSocketAddress.createUnresolved("yo", 9999),
         maybeForkId,
         new Bitvector(ATTESTATION_SUBNET_COUNT));

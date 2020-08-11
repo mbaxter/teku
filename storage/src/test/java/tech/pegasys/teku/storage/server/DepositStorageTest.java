@@ -23,13 +23,13 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 import tech.pegasys.teku.datastructures.util.DataStructureUtil;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.pow.api.TrackingEth1EventsChannel;
 import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
 import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.storage.api.schema.ReplayDepositsResult;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.storageSystem.StorageSystemArgumentsProvider;
-import tech.pegasys.teku.util.async.SafeFuture;
 
 public class DepositStorageTest {
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil();
@@ -57,7 +57,6 @@ public class DepositStorageTest {
 
     storageSystem.chainUpdater().initializeGenesis();
     depositStorage = storageSystem.createDepositStorage(true);
-    depositStorage.start();
   }
 
   @ParameterizedTest(name = "{0}")
@@ -88,7 +87,6 @@ public class DepositStorageTest {
       throws ExecutionException, InterruptedException {
     setup(storageSystemSupplier);
     depositStorage = DepositStorage.create(eventsChannel, database, false);
-    depositStorage.start();
 
     database.addMinGenesisTimeBlock(genesis_100);
     database.addDepositsFromBlockEvent(block_101);
@@ -107,7 +105,6 @@ public class DepositStorageTest {
       final StorageSystemArgumentsProvider.StorageSystemSupplier storageSystemSupplier)
       throws ExecutionException, InterruptedException {
     setup(storageSystemSupplier);
-    depositStorage.start();
 
     SafeFuture<ReplayDepositsResult> future = depositStorage.replayDepositEvents();
     assertThat(future.isDone()).isTrue();
@@ -126,7 +123,6 @@ public class DepositStorageTest {
       throws ExecutionException, InterruptedException {
     setup(storageSystemSupplier);
     database.addDepositsFromBlockEvent(block_100);
-    depositStorage.start();
 
     SafeFuture<ReplayDepositsResult> future = depositStorage.replayDepositEvents();
     assertThat(future.isDone()).isTrue();
@@ -151,7 +147,6 @@ public class DepositStorageTest {
       throws ExecutionException, InterruptedException {
     setup(storageSystemSupplier);
     database.addDepositsFromBlockEvent(block_100);
-    depositStorage.start();
 
     SafeFuture<ReplayDepositsResult> firstReplay = depositStorage.replayDepositEvents();
     assertThat(firstReplay).isCompleted();

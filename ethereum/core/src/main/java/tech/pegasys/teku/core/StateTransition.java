@@ -18,7 +18,7 @@ import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_HISTORICAL_ROOT;
 import static tech.pegasys.teku.util.config.Constants.ZERO_HASH;
 
-import com.google.common.primitives.UnsignedLong;
+import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -33,6 +33,7 @@ import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.state.BeaconState;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class StateTransition {
 
@@ -56,6 +57,7 @@ public class StateTransition {
       throws StateTransitionException {
     return initiate(preState, signed_block, true);
   }
+
   /**
    * v0.7.1
    * https://github.com/ethereum/eth2.0-specs/blob/v0.7.1/specs/core/0_beacon-chain.md#beacon-chain-state-transition-function
@@ -70,13 +72,32 @@ public class StateTransition {
   public BeaconState initiate(
       BeaconState preState, SignedBeaconBlock signed_block, boolean validateStateRootAndSignatures)
       throws StateTransitionException {
+    return initiate(preState, signed_block, validateStateRootAndSignatures, interimState -> {});
+  }
+
+  public BeaconState initiate(
+      BeaconState preState,
+      SignedBeaconBlock signed_block,
+      boolean validateStateRootAndSignatures,
+      final Consumer<BeaconState> beaconStateConsumer)
+      throws StateTransitionException {
     try {
       BlockValidator blockValidator =
-          validateStateRootAndSignatures ? this.blockValidator : BlockValidator.NOP;
+          validateStateRootAndSignatures ? this.blockValidator : BlockValidator.NOOP;
       final BeaconBlock block = signed_block.getMessage();
 
-      // Process slots (including those with no blocks) since block
-      BeaconState postSlotState = process_slots(preState, block.getSlot());
+      // * Process slots (including those with no blocks) since block
+      // * beaconStateConsumer only consumes the missing slots here,
+      //   the new block will be processed when adding to the store.
+      BeaconState postSlotState =
+          process_slots(
+              preState,
+              block.getSlot(),
+              state -> {
+                if (!state.getSlot().equals(block.getSlot())) {
+                  beaconStateConsumer.accept(state);
+                }
+              });
 
       // Process_block
       BeaconState postState = process_block(postSlotState, block);
@@ -126,8 +147,7 @@ public class StateTransition {
         state -> {
           // Cache state root
           Bytes32 previous_state_root = state.hash_tree_root();
-          int index =
-              state.getSlot().mod(UnsignedLong.valueOf(SLOTS_PER_HISTORICAL_ROOT)).intValue();
+          int index = state.getSlot().mod(UInt64.valueOf(SLOTS_PER_HISTORICAL_ROOT)).intValue();
           state.getState_roots().set(index, previous_state_root);
 
           // Cache latest block header state root
@@ -157,7 +177,13 @@ public class StateTransition {
    * @throws EpochProcessingException
    * @throws SlotProcessingException
    */
-  public BeaconState process_slots(BeaconState preState, UnsignedLong slot)
+  public BeaconState process_slots(BeaconState preState, UInt64 slot)
+      throws EpochProcessingException, SlotProcessingException {
+    return process_slots(preState, slot, interimState -> {});
+  }
+
+  public BeaconState process_slots(
+      BeaconState preState, UInt64 slot, final Consumer<BeaconState> beaconStateConsumer)
       throws SlotProcessingException, EpochProcessingException {
     try {
       checkArgument(
@@ -171,12 +197,13 @@ public class StateTransition {
         // Process epoch on the start slot of the next epoch
         if (state
             .getSlot()
-            .plus(UnsignedLong.ONE)
-            .mod(UnsignedLong.valueOf(SLOTS_PER_EPOCH))
-            .equals(UnsignedLong.ZERO)) {
+            .plus(UInt64.ONE)
+            .mod(UInt64.valueOf(SLOTS_PER_EPOCH))
+            .equals(UInt64.ZERO)) {
           state = EpochProcessor.processEpoch(state);
         }
-        state = state.updated(s -> s.setSlot(s.getSlot().plus(UnsignedLong.ONE)));
+        state = state.updated(s -> s.setSlot(s.getSlot().plus(UInt64.ONE)));
+        beaconStateConsumer.accept(state);
       }
       return state;
     } catch (IllegalArgumentException e) {

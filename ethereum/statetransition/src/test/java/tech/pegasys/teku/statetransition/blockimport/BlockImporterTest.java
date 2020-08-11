@@ -19,7 +19,6 @@ import static org.mockito.Mockito.mock;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_epoch_at_slot;
 
 import com.google.common.eventbus.EventBus;
-import com.google.common.primitives.UnsignedLong;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
@@ -35,6 +34,7 @@ import tech.pegasys.teku.core.StateTransition;
 import tech.pegasys.teku.core.results.BlockImportResult;
 import tech.pegasys.teku.core.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.core.signatures.Signer;
+import tech.pegasys.teku.core.signatures.UnprotectedSigner;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
@@ -42,6 +42,7 @@ import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
 import tech.pegasys.teku.datastructures.util.BeaconStateUtil;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.statetransition.BeaconChainUtil;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.storage.client.MemoryOnlyRecentChainData;
@@ -84,38 +85,39 @@ public class BlockImporterTest {
 
   @Test
   public void importBlock_success() throws Exception {
-    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UnsignedLong.ONE);
+    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UInt64.ONE);
     localChain.setSlot(block.getSlot());
 
-    final BlockImportResult result = blockImporter.importBlock(block);
+    final BlockImportResult result = blockImporter.importBlock(block).get();
     assertSuccessfulResult(result);
   }
 
   @Test
   public void importBlock_alreadyInChain() throws Exception {
-    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UnsignedLong.ONE);
+    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UInt64.ONE);
     localChain.setSlot(block.getSlot());
 
-    assertThat(blockImporter.importBlock(block).isSuccessful()).isTrue();
-    BlockImportResult result = blockImporter.importBlock(block);
+    assertThat(blockImporter.importBlock(block).get().isSuccessful()).isTrue();
+    BlockImportResult result = blockImporter.importBlock(block).get();
     assertSuccessfulResult(result);
   }
 
   @Test
   public void importBlock_validAttestations() throws Exception {
 
-    UnsignedLong currentSlot = UnsignedLong.ONE;
+    UInt64 currentSlot = UInt64.ONE;
     SignedBeaconBlock block1 = localChain.createAndImportBlockAtSlot(currentSlot);
-    currentSlot = currentSlot.plus(UnsignedLong.ONE);
+    currentSlot = currentSlot.plus(UInt64.ONE);
 
     AttestationGenerator attestationGenerator = new AttestationGenerator(validatorKeys);
-    final BeaconState state = recentChainData.getBlockState(block1.getRoot()).orElseThrow();
+    final BeaconState state =
+        recentChainData.retrieveBlockState(block1.getRoot()).join().orElseThrow();
     List<Attestation> attestations =
         attestationGenerator.getAttestationsForSlot(state, block1.getMessage(), currentSlot);
     List<Attestation> aggregatedAttestations =
         AttestationGenerator.groupAndAggregateAttestations(attestations);
 
-    currentSlot = currentSlot.plus(UnsignedLong.ONE);
+    currentSlot = currentSlot.plus(UInt64.ONE);
 
     localChain.createAndImportBlockAtSlotWithAttestations(currentSlot, aggregatedAttestations);
   }
@@ -123,12 +125,13 @@ public class BlockImporterTest {
   @Test
   public void importBlock_attestationWithInvalidSignature() throws Exception {
 
-    UnsignedLong currentSlot = UnsignedLong.ONE;
+    UInt64 currentSlot = UInt64.ONE;
     SignedBeaconBlock block1 = localChain.createAndImportBlockAtSlot(currentSlot);
-    currentSlot = currentSlot.plus(UnsignedLong.ONE);
+    currentSlot = currentSlot.plus(UInt64.ONE);
 
     AttestationGenerator attestationGenerator = new AttestationGenerator(validatorKeys);
-    final BeaconState state = recentChainData.getBlockState(block1.getRoot()).orElseThrow();
+    final BeaconState state =
+        recentChainData.retrieveBlockState(block1.getRoot()).join().orElseThrow();
     List<Attestation> attestations =
         attestationGenerator.getAttestationsForSlot(state, block1.getMessage(), currentSlot);
     List<Attestation> aggregatedAttestations =
@@ -139,7 +142,7 @@ public class BlockImporterTest {
         .get(aggregatedAttestations.size() / 2)
         .setAggregate_signature(BLSSignature.random(1));
 
-    UnsignedLong currentSlotFinal = currentSlot.plus(UnsignedLong.ONE);
+    UInt64 currentSlotFinal = currentSlot.plus(UInt64.ONE);
 
     assertThatCode(
             () -> {
@@ -154,9 +157,9 @@ public class BlockImporterTest {
     Constants.SLOTS_PER_EPOCH = 6;
 
     final List<SignedBeaconBlock> blocks = new ArrayList<>();
-    UnsignedLong currentSlot = recentChainData.getBestSlot();
+    UInt64 currentSlot = recentChainData.getBestSlot();
     for (int i = 0; i < Constants.SLOTS_PER_EPOCH; i++) {
-      currentSlot = currentSlot.plus(UnsignedLong.ONE);
+      currentSlot = currentSlot.plus(UInt64.ONE);
       final SignedBeaconBlock block = localChain.createAndImportBlockAtSlot(currentSlot);
       blocks.add(block);
     }
@@ -164,14 +167,14 @@ public class BlockImporterTest {
     // Update finalized epoch
     final StoreTransaction tx = recentChainData.startStoreTransaction();
     final Bytes32 bestRoot = recentChainData.getBestBlockRoot().orElseThrow();
-    final UnsignedLong bestEpoch = compute_epoch_at_slot(recentChainData.getBestSlot());
+    final UInt64 bestEpoch = compute_epoch_at_slot(recentChainData.getBestSlot());
     assertThat(bestEpoch.longValue()).isEqualTo(Constants.GENESIS_EPOCH + 1L);
     final Checkpoint finalized = new Checkpoint(bestEpoch, bestRoot);
     tx.setFinalizedCheckpoint(finalized);
     tx.commit().join();
 
     // Known blocks should report as successfully imported
-    final BlockImportResult result = blockImporter.importBlock(blocks.get(blocks.size() - 1));
+    final BlockImportResult result = blockImporter.importBlock(blocks.get(blocks.size() - 1)).get();
     assertSuccessfulResult(result);
   }
 
@@ -180,9 +183,9 @@ public class BlockImporterTest {
     Constants.SLOTS_PER_EPOCH = 6;
 
     final List<SignedBeaconBlock> blocks = new ArrayList<>();
-    UnsignedLong currentSlot = recentChainData.getBestSlot();
+    UInt64 currentSlot = recentChainData.getBestSlot();
     for (int i = 0; i < Constants.SLOTS_PER_EPOCH; i++) {
-      currentSlot = currentSlot.plus(UnsignedLong.ONE);
+      currentSlot = currentSlot.plus(UInt64.ONE);
       final SignedBeaconBlock block = localChain.createAndImportBlockAtSlot(currentSlot);
       blocks.add(block);
     }
@@ -190,23 +193,23 @@ public class BlockImporterTest {
     // Update finalized epoch
     final StoreTransaction tx = recentChainData.startStoreTransaction();
     final Bytes32 bestRoot = recentChainData.getBestBlockRoot().orElseThrow();
-    final UnsignedLong bestEpoch = compute_epoch_at_slot(recentChainData.getBestSlot());
+    final UInt64 bestEpoch = compute_epoch_at_slot(recentChainData.getBestSlot());
     assertThat(bestEpoch.longValue()).isEqualTo(Constants.GENESIS_EPOCH + 1L);
     final Checkpoint finalized = new Checkpoint(bestEpoch, bestRoot);
     tx.setFinalizedCheckpoint(finalized);
     tx.commit().join();
 
     // Import a block prior to the latest finalized block
-    final BlockImportResult result = blockImporter.importBlock(blocks.get(1));
+    final BlockImportResult result = blockImporter.importBlock(blocks.get(1)).get();
     assertImportFailed(result, FailureReason.UNKNOWN_PARENT);
   }
 
   @Test
   public void importBlock_parentBlockFromSameSlot() throws Exception {
     // First import a valid block at slot 1
-    final SignedBeaconBlock block = otherChain.createAndImportBlockAtSlot(UnsignedLong.ONE);
+    final SignedBeaconBlock block = otherChain.createAndImportBlockAtSlot(UInt64.ONE);
     localChain.setSlot(block.getSlot());
-    assertSuccessfulResult(blockImporter.importBlock(block));
+    assertSuccessfulResult(blockImporter.importBlock(block).get());
 
     // Now create an alternate block 1 with the real block one as the parent block
     final BeaconBlock invalidAncestryUnsignedBlock =
@@ -217,7 +220,8 @@ public class BlockImporterTest {
             block.getMessage().getState_root(),
             block.getMessage().getBody());
     final Signer signer =
-        new Signer(localChain.getSigner(block.getMessage().getProposer_index().intValue()));
+        new UnprotectedSigner(
+            localChain.getSigner(block.getMessage().getProposer_index().intValue()));
     final SignedBeaconBlock invalidAncestryBlock =
         new SignedBeaconBlock(
             invalidAncestryUnsignedBlock,
@@ -226,7 +230,7 @@ public class BlockImporterTest {
                     invalidAncestryUnsignedBlock, otherStorage.getHeadForkInfo().orElseThrow())
                 .join());
 
-    final BlockImportResult result = blockImporter.importBlock(invalidAncestryBlock);
+    final BlockImportResult result = blockImporter.importBlock(invalidAncestryBlock).get();
     assertThat(result.isSuccessful()).isFalse();
     assertThat(result.getFailureReason())
         .isEqualTo(BlockImportResult.FAILED_INVALID_ANCESTRY.getFailureReason());
@@ -241,33 +245,33 @@ public class BlockImporterTest {
 
   @Test
   public void importBlock_fromFuture() throws Exception {
-    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UnsignedLong.ONE);
+    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UInt64.ONE);
 
-    final BlockImportResult result = blockImporter.importBlock(block);
+    final BlockImportResult result = blockImporter.importBlock(block).get();
     assertImportFailed(result, FailureReason.BLOCK_IS_FROM_FUTURE);
   }
 
   @Test
   public void importBlock_unknownParent() throws Exception {
-    otherChain.createAndImportBlockAtSlot(UnsignedLong.ONE);
-    final SignedBeaconBlock block2 = otherChain.createAndImportBlockAtSlot(UnsignedLong.valueOf(2));
+    otherChain.createAndImportBlockAtSlot(UInt64.ONE);
+    final SignedBeaconBlock block2 = otherChain.createAndImportBlockAtSlot(UInt64.valueOf(2));
     localChain.setSlot(block2.getSlot());
 
-    final BlockImportResult result = blockImporter.importBlock(block2);
+    final BlockImportResult result = blockImporter.importBlock(block2).get();
     assertImportFailed(result, FailureReason.UNKNOWN_PARENT);
   }
 
   @Test
   public void importBlock_wrongChain() throws Exception {
-    UnsignedLong currentSlot = recentChainData.getBestSlot();
+    UInt64 currentSlot = recentChainData.getBestSlot();
     for (int i = 0; i < 3; i++) {
-      currentSlot = currentSlot.plus(UnsignedLong.ONE);
+      currentSlot = currentSlot.plus(UInt64.ONE);
       localChain.createAndImportBlockAtSlot(currentSlot);
     }
     // Update finalized epoch
     final StoreTransaction tx = recentChainData.startStoreTransaction();
     final Bytes32 finalizedRoot = recentChainData.getBestBlockRoot().orElseThrow();
-    final UnsignedLong finalizedEpoch = UnsignedLong.ONE;
+    final UInt64 finalizedEpoch = UInt64.ONE;
     final Checkpoint finalized = new Checkpoint(finalizedEpoch, finalizedRoot);
     tx.setFinalizedCheckpoint(finalized);
     tx.commit().join();
@@ -279,17 +283,17 @@ public class BlockImporterTest {
     final SignedBeaconBlock block =
         otherChain.createAndImportBlockAtSlotWithAttestations(currentSlot, List.of(attestation));
 
-    final BlockImportResult result = blockImporter.importBlock(block);
+    final BlockImportResult result = blockImporter.importBlock(block).get();
     assertImportFailed(result, FailureReason.UNKNOWN_PARENT);
   }
 
   @Test
   public void importBlock_invalidStateTransition() throws Exception {
-    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UnsignedLong.ONE);
+    final SignedBeaconBlock block = otherChain.createBlockAtSlot(UInt64.ONE);
     block.getMessage().setState_root(Bytes32.ZERO);
     localChain.setSlot(block.getSlot());
 
-    final BlockImportResult result = blockImporter.importBlock(block);
+    final BlockImportResult result = blockImporter.importBlock(block).get();
     assertImportFailed(result, FailureReason.FAILED_STATE_TRANSITION);
   }
 

@@ -79,7 +79,7 @@ public class ProfilingRun {
       EventBus localEventBus = mock(EventBus.class);
       RecentChainData recentChainData = MemoryOnlyRecentChainData.create(localEventBus);
       BeaconChainUtil localChain = BeaconChainUtil.create(recentChainData, validatorKeys, false);
-      recentChainData.initializeFromGenesis(initialState);
+      recentChainData.initializeFromGenesis(initialState).join();
       ForkChoice forkChoice = new ForkChoice(recentChainData, new StateTransition());
       BlockImporter blockImporter = new BlockImporter(recentChainData, forkChoice, localEventBus);
 
@@ -95,7 +95,7 @@ public class ProfilingRun {
           }
           long s = System.currentTimeMillis();
           localChain.setSlot(block.getSlot());
-          BlockImportResult result = blockImporter.importBlock(block);
+          BlockImportResult result = blockImporter.importBlock(block).join();
           System.out.println(
               "Imported block at #"
                   + block.getSlot()
@@ -146,7 +146,7 @@ public class ProfilingRun {
       EventBus localEventBus = mock(EventBus.class);
       RecentChainData recentChainData = MemoryOnlyRecentChainData.create(localEventBus);
       BeaconChainUtil localChain = BeaconChainUtil.create(recentChainData, validatorKeys, false);
-      recentChainData.initializeFromGenesis(initialState);
+      recentChainData.initializeFromGenesis(initialState).join();
       initialState = null;
       ForkChoice forkChoice = new ForkChoice(recentChainData, new StateTransition());
       BlockImporter blockImporter = new BlockImporter(recentChainData, forkChoice, localEventBus);
@@ -157,7 +157,7 @@ public class ProfilingRun {
         for (SignedBeaconBlock block : blockReader) {
           long s = System.currentTimeMillis();
           localChain.setSlot(block.getSlot());
-          BlockImportResult result = blockImporter.importBlock(block);
+          BlockImportResult result = blockImporter.importBlock(block).join();
           System.out.println(
               "Imported block at #"
                   + block.getSlot()

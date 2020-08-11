@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.storage.server;
 
-import com.google.common.primitives.UnsignedLong;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.util.List;
 import java.util.Map;
@@ -22,11 +21,12 @@ import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.datastructures.state.BeaconState;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
 import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.protoarray.ProtoArraySnapshot;
-import tech.pegasys.teku.storage.api.schema.SlotAndBlockRoot;
 import tech.pegasys.teku.storage.events.AnchorPoint;
 import tech.pegasys.teku.storage.events.StorageUpdate;
 import tech.pegasys.teku.storage.store.StoreBuilder;
@@ -39,7 +39,9 @@ public interface Database extends AutoCloseable {
 
   Optional<StoreBuilder> createMemoryStore();
 
-  Optional<UnsignedLong> getSlotForFinalizedBlockRoot(Bytes32 blockRoot);
+  Optional<UInt64> getSlotForFinalizedBlockRoot(Bytes32 blockRoot);
+
+  Optional<UInt64> getSlotForFinalizedStateRoot(Bytes32 stateRoot);
 
   /**
    * Return the finalized block at this slot if such a block exists.
@@ -47,7 +49,7 @@ public interface Database extends AutoCloseable {
    * @param slot The slot to query
    * @return Returns the finalized block proposed at this slot, if such a block exists
    */
-  Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(UnsignedLong slot);
+  Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(UInt64 slot);
 
   /**
    * Returns the latest finalized block at or prior to the given slot
@@ -55,7 +57,7 @@ public interface Database extends AutoCloseable {
    * @param slot The slot to query
    * @return Returns the latest finalized block proposed at or prior to the given slot
    */
-  Optional<SignedBeaconBlock> getLatestFinalizedBlockAtSlot(UnsignedLong slot);
+  Optional<SignedBeaconBlock> getLatestFinalizedBlockAtSlot(UInt64 slot);
 
   Optional<SignedBeaconBlock> getSignedBlock(Bytes32 root);
 
@@ -75,17 +77,17 @@ public interface Database extends AutoCloseable {
    * @return a Stream of blocks in the range startSlot to endSlot (both inclusive).
    */
   @MustBeClosed
-  Stream<SignedBeaconBlock> streamFinalizedBlocks(UnsignedLong startSlot, UnsignedLong endSlot);
+  Stream<SignedBeaconBlock> streamFinalizedBlocks(UInt64 startSlot, UInt64 endSlot);
 
-  List<Bytes32> getStateRootsBeforeSlot(final UnsignedLong slot);
+  List<Bytes32> getStateRootsBeforeSlot(final UInt64 slot);
 
-  void addHotStateRoot(final Bytes32 stateRoot, final SlotAndBlockRoot slotAndBlockRoot);
+  void addHotStateRoots(final Map<Bytes32, SlotAndBlockRoot> stateRootToSlotAndBlockRootMap);
 
   Optional<SlotAndBlockRoot> getSlotAndBlockRootFromStateRoot(final Bytes32 stateRoot);
 
   void pruneHotStateRoots(final List<Bytes32> stateRoots);
 
-  Optional<BeaconState> getLatestAvailableFinalizedState(UnsignedLong maxSlot);
+  Optional<BeaconState> getLatestAvailableFinalizedState(UInt64 maxSlot);
 
   Optional<MinGenesisTimeBlockEvent> getMinGenesisTimeBlock();
 

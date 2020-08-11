@@ -13,8 +13,6 @@
 
 package tech.pegasys.teku.api;
 
-import static com.google.common.primitives.UnsignedLong.ONE;
-import static com.google.common.primitives.UnsignedLong.ZERO;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,10 +23,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.datastructures.util.BeaconStateUtil.compute_epoch_at_slot;
-import static tech.pegasys.teku.util.async.SafeFuture.completedFuture;
+import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
+import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
+import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 
-import com.google.common.primitives.UnsignedLong;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -36,18 +35,23 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.api.response.GetBlockResponse;
+import tech.pegasys.teku.api.response.GetForkResponse;
 import tech.pegasys.teku.api.schema.BLSPubKey;
 import tech.pegasys.teku.api.schema.BeaconHead;
 import tech.pegasys.teku.api.schema.BeaconState;
 import tech.pegasys.teku.api.schema.BeaconValidators;
 import tech.pegasys.teku.api.schema.Committee;
-import tech.pegasys.teku.api.schema.Fork;
 import tech.pegasys.teku.api.schema.SignedBeaconBlock;
 import tech.pegasys.teku.api.schema.ValidatorWithIndex;
 import tech.pegasys.teku.api.schema.ValidatorsRequest;
+import tech.pegasys.teku.core.stategenerator.CheckpointStateGenerator;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.datastructures.state.Checkpoint;
+import tech.pegasys.teku.datastructures.state.CheckpointState;
 import tech.pegasys.teku.datastructures.state.CommitteeAssignment;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.client.ChainDataUnavailableException;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -55,7 +59,6 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystem;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.store.UpdatableStore;
-import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.config.StateStorageMode;
 
 public class ChainDataProviderTest {
@@ -69,14 +72,15 @@ public class ChainDataProviderTest {
   private tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock signedBeaconBlock;
   private BeaconState beaconState;
   private Bytes32 blockRoot;
-  private UnsignedLong slot;
+  private Bytes32 stateRoot;
+  private UInt64 slot;
   private RecentChainData recentChainData;
   private CombinedChainDataClient mockCombinedChainDataClient = mock(CombinedChainDataClient.class);
   private RecentChainData mockRecentChainData = mock(RecentChainData.class);
 
   @BeforeEach
   public void setup() {
-    slot = UnsignedLong.valueOf(SLOTS_PER_EPOCH * 3);
+    slot = UInt64.valueOf(SLOTS_PER_EPOCH * 3);
     storageSystem.chainUpdater().initializeGenesis();
     bestBlock = storageSystem.chainUpdater().advanceChain(slot);
     storageSystem.chainUpdater().updateBestBlock(bestBlock);
@@ -88,6 +92,7 @@ public class ChainDataProviderTest {
     beaconState = new BeaconState(beaconStateInternal);
     combinedChainDataClient = storageSystem.combinedChainDataClient();
     blockRoot = bestBlock.getRoot();
+    stateRoot = beaconStateInternal.hash_tree_root();
   }
 
   @Test
@@ -96,7 +101,7 @@ public class ChainDataProviderTest {
     final ChainDataProvider provider =
         new ChainDataProvider(recentChainData, combinedChainDataClient);
     final SafeFuture<Optional<List<Committee>>> future =
-        provider.getCommitteesAtEpoch(UnsignedLong.valueOf(50));
+        provider.getCommitteesAtEpoch(UInt64.valueOf(50));
     assertThat(future.get()).isEmpty();
   }
 
@@ -105,7 +110,7 @@ public class ChainDataProviderTest {
       throws ExecutionException, InterruptedException {
     final ChainDataProvider provider =
         new ChainDataProvider(recentChainData, combinedChainDataClient);
-    final UnsignedLong futureEpoch = slot.plus(UnsignedLong.valueOf(SLOTS_PER_EPOCH));
+    final UInt64 futureEpoch = slot.plus(UInt64.valueOf(SLOTS_PER_EPOCH));
 
     final SafeFuture<Optional<List<Committee>>> future = provider.getCommitteesAtEpoch(futureEpoch);
     assertThat(future.get()).isEmpty();
@@ -116,8 +121,16 @@ public class ChainDataProviderTest {
       throws ExecutionException, InterruptedException {
     final List<CommitteeAssignment> committeeAssignments =
         List.of(new CommitteeAssignment(List.of(1), ZERO, ONE));
-    final UnsignedLong currentEpoch =
-        bestBlock.getSlot().dividedBy(UnsignedLong.valueOf(SLOTS_PER_EPOCH));
+    final UInt64 currentEpoch = compute_epoch_at_slot(bestBlock.getSlot());
+
+    // Setup data
+    final UInt64 queryEpoch = currentEpoch.equals(ZERO) ? currentEpoch : currentEpoch.minus(ONE);
+    final Checkpoint checkpoint =
+        storageSystem.chainBuilder().getCurrentCheckpointForEpoch(queryEpoch);
+    final SignedBlockAndState checkpointBlockAndState =
+        storageSystem.chainBuilder().getBlockAndState(checkpoint.getRoot()).orElseThrow();
+    final CheckpointState checkpointState =
+        CheckpointStateGenerator.generate(checkpoint, checkpointBlockAndState);
 
     final ChainDataProvider provider =
         new ChainDataProvider(mockRecentChainData, mockCombinedChainDataClient);
@@ -127,8 +140,8 @@ public class ChainDataProviderTest {
     when(mockCombinedChainDataClient.getCommitteesFromState(any(), any()))
         .thenReturn(committeeAssignments);
     when(mockRecentChainData.getBestSlot()).thenReturn(bestBlock.getSlot());
-    when(mockCombinedChainDataClient.getBlockAndStateInEffectAtSlot(any()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(bestBlock.toUnsigned())));
+    when(mockCombinedChainDataClient.getCheckpointStateAtEpoch(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(checkpointState)));
     final SafeFuture<Optional<List<Committee>>> future =
         provider.getCommitteesAtEpoch(currentEpoch);
 
@@ -176,11 +189,11 @@ public class ChainDataProviderTest {
 
   @Test
   public void getGenesisTime_shouldReturnValueIfStoreAvailable() {
-    final UnsignedLong genesis = beaconStateInternal.getGenesis_time();
+    final UInt64 genesis = beaconStateInternal.getGenesis_time();
     final ChainDataProvider provider =
         new ChainDataProvider(recentChainData, combinedChainDataClient);
 
-    final UnsignedLong result = provider.getGenesisTime();
+    final UInt64 result = provider.getGenesisTime();
     assertEquals(genesis, result);
   }
 
@@ -315,31 +328,33 @@ public class ChainDataProviderTest {
   }
 
   @Test
-  void getStateBySlot_shouldReturnBeaconStateWhenFound()
-      throws ExecutionException, InterruptedException {
-    final BeaconBlockAndState blockAndState = bestBlock.toUnsigned();
-    final SafeFuture<Optional<BeaconBlockAndState>> safeFuture =
-        completedFuture(Optional.of(blockAndState));
-
-    final ChainDataProvider provider =
-        new ChainDataProvider(recentChainData, mockCombinedChainDataClient);
-    when(mockCombinedChainDataClient.isChainDataFullyAvailable()).thenReturn(true);
-    when(mockCombinedChainDataClient.getBestBlockRoot())
-        .thenReturn(Optional.of(bestBlock.getRoot()));
-    when(mockCombinedChainDataClient.getBlockAndStateInEffectAtSlot(ZERO)).thenReturn(safeFuture);
-
-    final SafeFuture<Optional<BeaconState>> future = provider.getStateAtSlot(ZERO);
-    verify(mockCombinedChainDataClient).getBlockAndStateInEffectAtSlot(ZERO);
-
-    final BeaconState result = future.get().get();
-    assertThat(result).usingRecursiveComparison().isEqualTo(beaconState);
-  }
-
-  @Test
   public void getStateByBlockRoot_shouldThrowWhenStoreNotFound() {
     final ChainDataProvider provider = new ChainDataProvider(null, mockCombinedChainDataClient);
     final SafeFuture<Optional<BeaconState>> future = provider.getStateByBlockRoot(blockRoot);
     assertThatThrownBy(future::get).hasCauseInstanceOf(ChainDataUnavailableException.class);
+  }
+
+  @Test
+  public void getStateByStateRoot_shouldThrowWhenStoreNotFound() {
+    final ChainDataProvider provider = new ChainDataProvider(null, mockCombinedChainDataClient);
+    final SafeFuture<Optional<BeaconState>> future = provider.getStateByStateRoot(blockRoot);
+    assertThatThrownBy(future::get).hasCauseInstanceOf(ChainDataUnavailableException.class);
+  }
+
+  @Test
+  public void getStateByStateRoot_shouldReturnEmptyWhenNotFound()
+      throws ExecutionException, InterruptedException {
+    final ChainDataProvider provider =
+        new ChainDataProvider(recentChainData, mockCombinedChainDataClient);
+    final SafeFuture<Optional<tech.pegasys.teku.datastructures.state.BeaconState>>
+        futureBeaconState = completedFuture(Optional.of(beaconStateInternal));
+    when(mockCombinedChainDataClient.isStoreAvailable()).thenReturn(true);
+    when(mockCombinedChainDataClient.getStateByStateRoot(stateRoot)).thenReturn(futureBeaconState);
+    final SafeFuture<Optional<BeaconState>> future = provider.getStateByStateRoot(stateRoot);
+    verify(mockCombinedChainDataClient).getStateByStateRoot(stateRoot);
+
+    final BeaconState result = future.get().get();
+    assertThat(result).usingRecursiveComparison().isEqualTo(beaconState);
   }
 
   @Test
@@ -413,22 +428,26 @@ public class ChainDataProviderTest {
   }
 
   @Test
-  public void getFork_shouldThrowIfNoBlockRoot() {
+  public void getForkInfo_shouldThrowIfNoBlockRoot() {
     ChainDataProvider provider =
         new ChainDataProvider(mockRecentChainData, mockCombinedChainDataClient);
     when(mockCombinedChainDataClient.isStoreAvailable()).thenReturn(true);
     when(mockRecentChainData.getBestState()).thenReturn(Optional.empty());
-    assertThatThrownBy(provider::getFork).isInstanceOf(ChainDataUnavailableException.class);
+    assertThatThrownBy(provider::getForkInfo).isInstanceOf(ChainDataUnavailableException.class);
   }
 
   @Test
-  public void getFork_shouldHaveForkIfBlockRootNotEmpty() {
+  public void getForkInfo_shouldHaveForkIfBlockRootNotEmpty() {
     final ChainDataProvider provider =
         new ChainDataProvider(mockRecentChainData, mockCombinedChainDataClient);
     when(mockCombinedChainDataClient.isStoreAvailable()).thenReturn(true);
     when(mockRecentChainData.getBestState()).thenReturn(Optional.of(beaconStateInternal));
-    final Fork result = provider.getFork();
+    final GetForkResponse result = provider.getForkInfo();
     verify(mockCombinedChainDataClient).isStoreAvailable();
-    assertThat(result).isEqualToComparingFieldByField(beaconState.fork);
+
+    assertThat(result.previous_version).isEqualTo(beaconState.fork.previous_version);
+    assertThat(result.current_version).isEqualTo(beaconState.fork.current_version);
+    assertThat(result.epoch).isEqualTo(beaconState.fork.epoch);
+    assertThat(result.genesis_validators_root).isEqualTo(beaconState.genesis_validators_root);
   }
 }

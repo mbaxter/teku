@@ -24,6 +24,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.Duration;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,7 @@ public class ExternalMessageSignerServiceIntegrationTest {
     this.client = client;
     signingServiceUri = new URL("http://127.0.0.1:" + client.getLocalPort());
 
-    final Bytes privateKey = Bytes.fromHexString(PRIVATE_KEY);
+    final Bytes32 privateKey = Bytes32.fromHexString(PRIVATE_KEY);
     keyPair = new BLSKeyPair(BLSSecretKey.fromBytes(privateKey));
     expectedSignature = BLS.sign(keyPair.getSecretKey(), SIGNING_ROOT);
 
@@ -78,7 +79,7 @@ public class ExternalMessageSignerServiceIntegrationTest {
     final ExternalMessageSignerService externalMessageSignerService =
         new ExternalMessageSignerService(
             signingServiceUri,
-            BLSPublicKey.fromBytes(Bytes.fromHexString(UNKNOWN_PUBLIC_KEY)),
+            BLSPublicKey.fromSSZBytes(Bytes.fromHexString(UNKNOWN_PUBLIC_KEY)),
             TIMEOUT);
 
     assertThatThrownBy(() -> externalMessageSignerService.signBlock(SIGNING_ROOT).join())
@@ -116,9 +117,7 @@ public class ExternalMessageSignerServiceIntegrationTest {
 
   @Test
   void signsBlockWhenSigningServiceReturnsSuccessfulResponse() {
-    client
-        .when(request())
-        .respond(response().withBody(expectedSignature.getSignature().toString()));
+    client.when(request()).respond(response().withBody(expectedSignature.toString()));
 
     final BLSSignature signature = externalMessageSignerService.signBlock(SIGNING_ROOT).join();
     assertThat(signature).isEqualTo(expectedSignature);

@@ -17,8 +17,8 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static tech.pegasys.teku.metrics.TekuMetricCategory.STORAGE_FINALIZED_DB;
 import static tech.pegasys.teku.metrics.TekuMetricCategory.STORAGE_HOT_DB;
+import static tech.pegasys.teku.util.config.Constants.SLOTS_PER_EPOCH;
 
-import com.google.common.primitives.UnsignedLong;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.time.Instant;
 import java.util.HashMap;
@@ -35,14 +35,16 @@ import tech.pegasys.teku.core.lookup.BlockProvider;
 import tech.pegasys.teku.core.stategenerator.StateGenerator;
 import tech.pegasys.teku.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.datastructures.hashtree.HashTree;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.Checkpoint;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.pow.event.DepositsFromBlockEvent;
 import tech.pegasys.teku.pow.event.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.protoarray.ProtoArraySnapshot;
-import tech.pegasys.teku.storage.api.schema.SlotAndBlockRoot;
 import tech.pegasys.teku.storage.events.AnchorPoint;
 import tech.pegasys.teku.storage.events.StorageUpdate;
 import tech.pegasys.teku.storage.server.Database;
@@ -61,8 +63,8 @@ import tech.pegasys.teku.storage.server.rocksdb.dataaccess.V4HotRocksDbDao;
 import tech.pegasys.teku.storage.server.rocksdb.schema.V3Schema;
 import tech.pegasys.teku.storage.server.rocksdb.schema.V4SchemaFinalized;
 import tech.pegasys.teku.storage.server.rocksdb.schema.V4SchemaHot;
+import tech.pegasys.teku.storage.server.state.StateRootRecorder;
 import tech.pegasys.teku.storage.store.StoreBuilder;
-import tech.pegasys.teku.util.async.SafeFuture;
 import tech.pegasys.teku.util.config.StateStorageMode;
 
 public class RocksDbDatabase implements Database {
@@ -173,18 +175,18 @@ public class RocksDbDatabase implements Database {
 
   @Override
   public Optional<StoreBuilder> createMemoryStore() {
-    Optional<UnsignedLong> maybeGenesisTime = hotDao.getGenesisTime();
+    Optional<UInt64> maybeGenesisTime = hotDao.getGenesisTime();
     if (maybeGenesisTime.isEmpty()) {
       // If genesis time hasn't been set, genesis hasn't happened and we have no data
       return Optional.empty();
     }
-    final UnsignedLong genesisTime = maybeGenesisTime.get();
+    final UInt64 genesisTime = maybeGenesisTime.get();
     final Checkpoint justifiedCheckpoint = hotDao.getJustifiedCheckpoint().orElseThrow();
     final Checkpoint finalizedCheckpoint = hotDao.getFinalizedCheckpoint().orElseThrow();
     final Checkpoint bestJustifiedCheckpoint = hotDao.getBestJustifiedCheckpoint().orElseThrow();
     final BeaconState finalizedState = hotDao.getLatestFinalizedState().orElseThrow();
 
-    final Map<UnsignedLong, VoteTracker> votes = hotDao.getVotes();
+    final Map<UInt64, VoteTracker> votes = hotDao.getVotes();
 
     // Build child-parent lookup
     final Map<Bytes32, Bytes32> childToParentLookup = new HashMap<>();
@@ -205,7 +207,7 @@ public class RocksDbDatabase implements Database {
     return Optional.of(
         StoreBuilder.create()
             .metricsSystem(metricsSystem)
-            .time(UnsignedLong.valueOf(Instant.now().getEpochSecond()))
+            .time(UInt64.valueOf(Instant.now().getEpochSecond()))
             .genesisTime(genesisTime)
             .finalizedCheckpoint(finalizedCheckpoint)
             .justifiedCheckpoint(justifiedCheckpoint)
@@ -216,22 +218,27 @@ public class RocksDbDatabase implements Database {
   }
 
   @Override
-  public Optional<UnsignedLong> getSlotForFinalizedBlockRoot(final Bytes32 blockRoot) {
+  public Optional<UInt64> getSlotForFinalizedBlockRoot(final Bytes32 blockRoot) {
     return finalizedDao.getSlotForFinalizedBlockRoot(blockRoot);
   }
 
   @Override
-  public Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(final UnsignedLong slot) {
+  public Optional<UInt64> getSlotForFinalizedStateRoot(final Bytes32 stateRoot) {
+    return finalizedDao.getSlotForFinalizedStateRoot(stateRoot);
+  }
+
+  @Override
+  public Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(final UInt64 slot) {
     return finalizedDao.getFinalizedBlockAtSlot(slot);
   }
 
   @Override
-  public Optional<SignedBeaconBlock> getLatestFinalizedBlockAtSlot(final UnsignedLong slot) {
+  public Optional<SignedBeaconBlock> getLatestFinalizedBlockAtSlot(final UInt64 slot) {
     return finalizedDao.getLatestFinalizedBlockAtSlot(slot);
   }
 
   @Override
-  public Optional<BeaconState> getLatestAvailableFinalizedState(final UnsignedLong maxSlot) {
+  public Optional<BeaconState> getLatestAvailableFinalizedState(final UInt64 maxSlot) {
     return finalizedDao.getLatestAvailableFinalizedState(maxSlot);
   }
 
@@ -250,26 +257,32 @@ public class RocksDbDatabase implements Database {
   @Override
   @MustBeClosed
   public Stream<SignedBeaconBlock> streamFinalizedBlocks(
-      final UnsignedLong startSlot, final UnsignedLong endSlot) {
+      final UInt64 startSlot, final UInt64 endSlot) {
     return finalizedDao.streamFinalizedBlocks(startSlot, endSlot);
   }
 
   @Override
-  public List<Bytes32> getStateRootsBeforeSlot(final UnsignedLong slot) {
+  public List<Bytes32> getStateRootsBeforeSlot(final UInt64 slot) {
     return hotDao.getStateRootsBeforeSlot(slot);
   }
 
   @Override
-  public void addHotStateRoot(final Bytes32 stateRoot, final SlotAndBlockRoot slotAndBlockRoot) {
+  public void addHotStateRoots(
+      final Map<Bytes32, SlotAndBlockRoot> stateRootToSlotAndBlockRootMap) {
     try (final HotUpdater updater = hotDao.hotUpdater()) {
-      updater.addHotStateRoot(stateRoot, slotAndBlockRoot);
+      updater.addHotStateRoots(stateRootToSlotAndBlockRootMap);
       updater.commit();
     }
   }
 
   @Override
   public Optional<SlotAndBlockRoot> getSlotAndBlockRootFromStateRoot(final Bytes32 stateRoot) {
-    return hotDao.getSlotAndBlockRootFromStateRoot(stateRoot);
+    Optional<SlotAndBlockRoot> maybeSlotAndBlockRoot =
+        hotDao.getSlotAndBlockRootFromStateRoot(stateRoot);
+    if (maybeSlotAndBlockRoot.isPresent()) {
+      return maybeSlotAndBlockRoot;
+    }
+    return finalizedDao.getSlotAndBlockRootForFinalizedStateRoot(stateRoot);
   }
 
   @Override
@@ -337,12 +350,25 @@ public class RocksDbDatabase implements Database {
     try (final HotUpdater updater = hotDao.hotUpdater()) {
       // Store new hot data
       update.getGenesisTime().ifPresent(updater::setGenesisTime);
-      update.getFinalizedCheckpoint().ifPresent(updater::setFinalizedCheckpoint);
+      update
+          .getFinalizedCheckpoint()
+          .ifPresent(
+              checkpoint -> {
+                updater.setFinalizedCheckpoint(checkpoint);
+                UInt64 finalizedSlot =
+                    checkpoint.getEpochStartSlot().plus(UInt64.valueOf(SLOTS_PER_EPOCH));
+                updater.pruneHotStateRoots(hotDao.getStateRootsBeforeSlot(finalizedSlot));
+              });
+
       update.getJustifiedCheckpoint().ifPresent(updater::setJustifiedCheckpoint);
       update.getBestJustifiedCheckpoint().ifPresent(updater::setBestJustifiedCheckpoint);
       update.getLatestFinalizedState().ifPresent(updater::setLatestFinalizedState);
 
       updater.addHotBlocks(update.getHotBlocks());
+
+      if (update.getStateRoots().size() > 0) {
+        updater.addHotStateRoots(update.getStateRoots());
+      }
       updater.addVotes(update.getVotes());
 
       // Delete finalized data from hot db
@@ -377,14 +403,17 @@ public class RocksDbDatabase implements Database {
                   .childAndParentRoots(finalizedChildToParentMap)
                   .build();
 
+          final StateRootRecorder recorder =
+              new StateRootRecorder(baseBlock.getSlot(), updater::addFinalizedStateRoot);
           final StateGenerator stateGenerator =
               StateGenerator.create(blockTree, baseBlock, blockProvider, finalizedStates);
-          // TODO - don't join, create synchronous API for synchronous blockProvider
+          // TODO (#2397) - don't join, create synchronous API for synchronous blockProvider
           stateGenerator
               .regenerateAllStates(
                   (block, state) -> {
                     updater.addFinalizedBlock(block);
                     updater.addFinalizedState(block.getRoot(), state);
+                    recorder.acceptNextState(state);
                   })
               .join();
           break;
