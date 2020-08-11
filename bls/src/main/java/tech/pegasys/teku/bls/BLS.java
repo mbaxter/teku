@@ -22,8 +22,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.mikuli.BLS12381;
 import tech.pegasys.teku.bls.mikuli.BLS12381.BatchSemiAggregate;
@@ -38,8 +36,6 @@ import tech.pegasys.teku.bls.mikuli.PublicKey;
  * by this one conforming to the specification or standard.
  */
 public class BLS {
-
-  private static final Logger LOG = LogManager.getLogger();
 
   /*
    * The following are the methods used directly in the Ethereum 2.0 specifications. These strictly adhere to the standard.
@@ -69,10 +65,6 @@ public class BLS {
    * @return True if the verification is successful, false otherwise.
    */
   public static boolean verify(BLSPublicKey publicKey, Bytes message, BLSSignature signature) {
-    if (!BLSConstants.VERIFICATION_ENABLED) {
-      LOG.warn("Skipping bls verification.");
-      return true;
-    }
     return BLS12381.coreVerify(publicKey.getPublicKey(), message, signature.getSignature());
   }
 
@@ -138,10 +130,6 @@ public class BLS {
    */
   public static boolean fastAggregateVerify(
       List<BLSPublicKey> publicKeys, Bytes message, BLSSignature signature) {
-    if (!BLSConstants.VERIFICATION_ENABLED) {
-      LOG.warn("Skipping bls verification.");
-      return true;
-    }
     if (publicKeys.isEmpty()) return false;
     List<PublicKey> publicKeyObjects =
         publicKeys.stream().map(BLSPublicKey::getPublicKey).collect(Collectors.toList());

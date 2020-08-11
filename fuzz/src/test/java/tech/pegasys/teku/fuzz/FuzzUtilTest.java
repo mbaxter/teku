@@ -14,33 +14,40 @@
 package tech.pegasys.teku.fuzz;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.junit.BouncyCastleExtension;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import tech.pegasys.teku.core.BlockProcessorUtil;
-import tech.pegasys.teku.core.exceptions.BlockProcessingException;
-import tech.pegasys.teku.datastructures.operations.Deposit;
+import org.junit.jupiter.api.RepeatedTest;
 import tech.pegasys.teku.datastructures.operations.DepositWithIndex;
+import tech.pegasys.teku.datastructures.operations.Deposit;
+import tech.pegasys.teku.core.BlockProcessorUtil;
+import tech.pegasys.teku.ssz.SSZTypes.SSZList;
+import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
+import org.junit.jupiter.api.extension.ExtendWith;
+import tech.pegasys.teku.datastructures.util.DataStructureUtil;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.BeaconStateImpl;
-import tech.pegasys.teku.datastructures.util.DataStructureUtil;
-import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
+import tech.pegasys.teku.fuzz.input.AttestationFuzzInput;
+import tech.pegasys.teku.fuzz.input.AttesterSlashingFuzzInput;
+import tech.pegasys.teku.fuzz.input.BlockFuzzInput;
+import tech.pegasys.teku.fuzz.input.BlockHeaderFuzzInput;
 import tech.pegasys.teku.fuzz.input.DepositFuzzInput;
-import tech.pegasys.teku.ssz.SSZTypes.SSZList;
+import tech.pegasys.teku.fuzz.input.ProposerSlashingFuzzInput;
+import tech.pegasys.teku.fuzz.input.VoluntaryExitFuzzInput;
+import tech.pegasys.teku.core.exceptions.BlockProcessingException;
+import java.util.Optional;
+
 
 @ExtendWith(BouncyCastleExtension.class)
 class FuzzUtilTest {
 
   // Basic sanity tests for Fuzzing Harnesses
-  // NOTE: for the purposes of this class, we don't care so much that operation is
-  // correct/equivalent according to the spec
-  // (the reference tests cover this), but that the Fuzz harness is equivalent to the behavior of
-  // the internal process.
-  // e.g. These tests don't care whether process_deposits is correct, but that the harness correctly
-  // uses process_deposits.
+  // NOTE: for the purposes of this class, we don't care so much that operation is correct/equivalent according to the spec
+  // (the reference tests cover this), but that the Fuzz harness is equivalent to the behavior of the internal process.
+  // e.g. These tests don't care whether process_deposits is correct, but that the harness correctly uses process_deposits.
   // Will this pick things up, or is it basically implementing the same logic twice?
   // TODO confirm
 
@@ -51,8 +58,7 @@ class FuzzUtilTest {
 
   @Test
   void shouldProcessRandomDepositEquivalently() {
-    // TODO if the randomBeaconState might not be "valid", we want to use a fixed BeaconState that
-    // is correct
+    // TODO if the randomBeaconState might not be "valid", we want to use a fixed BeaconState that is correct
     // TODO check: unlikely that this is a valid deposit for the beaconState?
     BeaconState beaconState = dataStructureUtil.randomBeaconState();
     SSZList<DepositWithIndex> deposits = dataStructureUtil.newDeposits(1);
@@ -62,23 +68,20 @@ class FuzzUtilTest {
     Optional<byte[]> actual = fuzzUtil.fuzzDeposit(rawInput);
 
     try {
-      BeaconState postState =
-          beaconState.updated(
-              state -> {
-                BlockProcessorUtil.process_deposits(state, deposits);
-              });
+      BeaconState postState = beaconState.updated(state -> {
+        BlockProcessorUtil.process_deposits(state, deposits);
+      });
       byte[] expected = SimpleOffsetSerializer.serialize(postState).toArrayUnsafe();
-      assertThat(actual)
-          .hasValueSatisfying(
-              b -> {
-                assertThat(b).isEqualTo(expected);
-              });
+      assertThat(actual).hasValueSatisfying(b -> {
+        assertThat(b).isEqualTo(expected);
+      });
 
     } catch (BlockProcessingException e) {
       // actual should be empty
       assertThat(actual).isEmpty();
     }
   }
+
 
   // *************** END Deposit Tests *******************
 
@@ -101,15 +104,10 @@ class FuzzUtilTest {
 
     // first 2 bytes (little endian) % 100 provide the count, the rest the seed
     // 1000 = 16 (little endian)
-    byte[] input =
-        Bytes.fromHexString(
-                "0x10000000000000000000000000000000000000000000000000000000000000000000")
-            .toArrayUnsafe();
-    assertThat(fuzzUtil.fuzzShuffle(input))
-        .hasValueSatisfying(
-            b -> {
-              assertThat(b).hasSize(16 * Long.BYTES);
-            });
+    byte[] input = Bytes.fromHexString("0x10000000000000000000000000000000000000000000000000000000000000000000").toArrayUnsafe();
+    assertThat(fuzzUtil.fuzzShuffle(input)).hasValueSatisfying(b -> {
+        assertThat(b).hasSize(16 * Long.BYTES);
+    });
   }
 
   // *************** END Shuffling Tests *****************
@@ -120,27 +118,27 @@ class FuzzUtilTest {
   // but the DataStructureUtil functions returns a BeaconState
   private BeaconStateImpl fromBeaconState(BeaconState state) {
     return new BeaconStateImpl(
-        state.getGenesis_time(),
-        state.getGenesis_validators_root(),
-        state.getSlot(),
-        state.getFork(),
-        state.getLatest_block_header(),
-        state.getBlock_roots(),
-        state.getState_roots(),
-        state.getHistorical_roots(),
-        state.getEth1_data(),
-        state.getEth1_data_votes(),
-        state.getEth1_deposit_index(),
-        state.getValidators(),
-        state.getBalances(),
-        state.getRandao_mixes(),
-        state.getSlashings(),
-        state.getPrevious_epoch_attestations(),
-        state.getCurrent_epoch_attestations(),
-        state.getJustification_bits(),
-        state.getPrevious_justified_checkpoint(),
-        state.getCurrent_justified_checkpoint(),
-        state.getFinalized_checkpoint());
+                state.getGenesis_time(),
+                state.getGenesis_validators_root(),
+                state.getSlot(),
+                state.getFork(),
+                state.getLatest_block_header(),
+                state.getBlock_roots(),
+                state.getState_roots(),
+                state.getHistorical_roots(),
+                state.getEth1_data(),
+                state.getEth1_data_votes(),
+                state.getEth1_deposit_index(),
+                state.getValidators(),
+                state.getBalances(),
+                state.getRandao_mixes(),
+                state.getSlashings(),
+                state.getPrevious_epoch_attestations(),
+                state.getCurrent_epoch_attestations(),
+                state.getJustification_bits(),
+                state.getPrevious_justified_checkpoint(),
+                state.getCurrent_justified_checkpoint(),
+                state.getFinalized_checkpoint());
   }
 
   /*// copied from BlockProcessorUtilTest

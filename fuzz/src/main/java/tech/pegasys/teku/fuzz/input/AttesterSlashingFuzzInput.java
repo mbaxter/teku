@@ -44,6 +44,15 @@ public class AttesterSlashingFuzzInput implements SimpleOffsetSerializable, SSZC
     return state.getSSZFieldCount() + attester_slashing.getSSZFieldCount();
   }
 
+  // Since its both fields are variable we leave untouched?
+  /*@Override
+  public List<Bytes> get_fixed_parts() {
+  List<Bytes> fixedPartsList = new ArrayList<>();
+  fixedPartsList.addAll(state.get_fixed_parts());
+  fixedPartsList.addAll(attester_slashing.get_fixed_parts());
+  return fixedPartsList;
+  }*/
+
   @Override
   public List<Bytes> get_variable_parts() {
     // Because we know both fields are variable and registered, we can just serialize.
