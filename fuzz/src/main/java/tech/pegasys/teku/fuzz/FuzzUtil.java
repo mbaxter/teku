@@ -53,10 +53,15 @@ public class FuzzUtil {
   // Size of ValidatorIndex returned by shuffle
   private static final int OUTPUT_INDEX_BYTES = Long.BYTES;
 
-  private boolean disable_bls;
+  private final boolean disable_bls;
 
   // NOTE: this uses primitive values as parameters to more easily call via JNI
   public FuzzUtil(final boolean useMainnetConfig, final boolean disable_bls) {
+    initialize(useMainnetConfig, disable_bls);
+    this.disable_bls = disable_bls;
+  }
+
+  public static void initialize(final boolean useMainnetConfig, final boolean disable_bls) {
     // NOTE: makes global Constants/config changes
     if (useMainnetConfig) {
       Constants.setConstants("mainnet");
@@ -82,7 +87,6 @@ public class FuzzUtil {
     SimpleOffsetSerializer.classReflectionInfo.put(
         VoluntaryExitFuzzInput.class, new ReflectionInformation(VoluntaryExitFuzzInput.class));
 
-    this.disable_bls = disable_bls;
     if (disable_bls) {
       BLSConstants.disableBLSVerification();
     }
