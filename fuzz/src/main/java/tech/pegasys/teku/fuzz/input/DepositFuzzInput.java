@@ -15,6 +15,7 @@ package tech.pegasys.teku.fuzz.input;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.datastructures.operations.Deposit;
 import tech.pegasys.teku.datastructures.state.BeaconState;
@@ -64,5 +65,23 @@ public class DepositFuzzInput implements SimpleOffsetSerializable, SSZContainer 
 
   public BeaconState getState() {
     return state;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (o == this) {
+      return true;
+    }
+    if (!(o instanceof DepositFuzzInput)) {
+      return false;
+    }
+    final DepositFuzzInput that = (DepositFuzzInput) o;
+    return Objects.equals(getState(), that.getState())
+        && Objects.equals(getDeposit(), that.getDeposit());
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(getState(), getDeposit());
   }
 }

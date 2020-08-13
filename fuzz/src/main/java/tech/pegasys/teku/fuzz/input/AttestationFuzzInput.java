@@ -14,6 +14,7 @@
 package tech.pegasys.teku.fuzz.input;
 
 import java.util.List;
+import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.datastructures.operations.Attestation;
 import tech.pegasys.teku.datastructures.state.BeaconState;
@@ -64,5 +65,23 @@ public class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContai
 
   public BeaconState getState() {
     return state;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (o == this) {
+      return true;
+    }
+    if (!(o instanceof AttestationFuzzInput)) {
+      return false;
+    }
+    final AttestationFuzzInput that = (AttestationFuzzInput) o;
+    return Objects.equals(getState(), that.getState())
+        && Objects.equals(getAttestation(), that.getAttestation());
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(getState(), getAttestation());
   }
 }

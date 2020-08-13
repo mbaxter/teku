@@ -14,6 +14,7 @@
 package tech.pegasys.teku.fuzz.input;
 
 import java.util.List;
+import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.datastructures.state.BeaconState;
@@ -61,5 +62,23 @@ public class BlockHeaderFuzzInput implements SimpleOffsetSerializable, SSZContai
 
   public BeaconState getState() {
     return state;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (o == this) {
+      return true;
+    }
+    if (!(o instanceof BlockHeaderFuzzInput)) {
+      return false;
+    }
+    final BlockHeaderFuzzInput that = (BlockHeaderFuzzInput) o;
+    return Objects.equals(getState(), that.getState())
+        && Objects.equals(getBlock(), that.getBlock());
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(getState(), getBlock());
   }
 }

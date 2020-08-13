@@ -15,6 +15,7 @@ package tech.pegasys.teku.fuzz.input;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.datastructures.operations.SignedVoluntaryExit;
@@ -72,5 +73,22 @@ public class VoluntaryExitFuzzInput implements SimpleOffsetSerializable, SSZCont
 
   public BeaconState getState() {
     return state;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (o == this) {
+      return true;
+    }
+    if (!(o instanceof VoluntaryExitFuzzInput)) {
+      return false;
+    }
+    final VoluntaryExitFuzzInput that = (VoluntaryExitFuzzInput) o;
+    return Objects.equals(getState(), that.getState()) && Objects.equals(getExit(), that.getExit());
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(getState(), getExit());
   }
 }
