@@ -34,7 +34,6 @@ import tech.pegasys.teku.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.datastructures.state.BeaconState;
 import tech.pegasys.teku.datastructures.state.BeaconStateImpl;
-import tech.pegasys.teku.datastructures.util.DataStructureUtil;
 import tech.pegasys.teku.datastructures.util.SimpleOffsetSerializer;
 import tech.pegasys.teku.fuzz.input.AttestationFuzzInput;
 import tech.pegasys.teku.fuzz.input.AttesterSlashingFuzzInput;
@@ -57,9 +56,6 @@ class FuzzUtilTest {
   // uses process_deposits.
   // Will this pick things up, or is it basically implementing the same logic twice?
   // TODO confirm
-
-  private final FuzzUtil fuzzUtil = new FuzzUtil(true, true);
-  private final DataStructureUtil dataStructureUtil = new DataStructureUtil();
 
   // *************** START Deposit Tests *****************
 
@@ -211,7 +207,9 @@ class FuzzUtilTest {
   }
 
   @Test
-  void shuffleInsufficientInput() {
+  void fuzzShuffle_insufficientInput() {
+    final FuzzUtil fuzzUtil = new FuzzUtil(true, true);
+
     byte[] emptyInput = new byte[0];
     assertThat(fuzzUtil.fuzzShuffle(emptyInput)).isEmpty();
     assertThat(fuzzUtil.fuzzShuffle(Bytes.random(15).toArrayUnsafe())).isEmpty();
@@ -220,7 +218,9 @@ class FuzzUtilTest {
   }
 
   @Test
-  void shuffleSufficientInput() {
+  void fuzzShuffle_sufficientInput() {
+    final FuzzUtil fuzzUtil = new FuzzUtil(true, true);
+
     // minimum length is 34, and should succeed
     assertThat(fuzzUtil.fuzzShuffle(Bytes.random(34).toArrayUnsafe())).isPresent();
     assertThat(fuzzUtil.fuzzShuffle(Bytes.random(80).toArrayUnsafe())).isPresent();
