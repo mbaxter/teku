@@ -50,7 +50,7 @@ public class VoluntaryExitFuzzInput implements SimpleOffsetSerializable, SSZCont
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + exit.getSSZFieldCount();
+    return 2;
   }
 
   @Override

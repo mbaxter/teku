@@ -42,7 +42,7 @@ public class AttesterSlashingFuzzInput implements SimpleOffsetSerializable, SSZC
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + attester_slashing.getSSZFieldCount();
+    return 2;
   }
 
   @Override

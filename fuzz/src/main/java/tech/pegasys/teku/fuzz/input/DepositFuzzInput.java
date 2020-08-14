@@ -42,7 +42,7 @@ public class DepositFuzzInput implements SimpleOffsetSerializable, SSZContainer 
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + deposit.getSSZFieldCount();
+    return 2;
   }
 
   @Override

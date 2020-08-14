@@ -43,7 +43,7 @@ public class ProposerSlashingFuzzInput implements SimpleOffsetSerializable, SSZC
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + proposer_slashing.getSSZFieldCount();
+    return 2;
   }
 
   @Override

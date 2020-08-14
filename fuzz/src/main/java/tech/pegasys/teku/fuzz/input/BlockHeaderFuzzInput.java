@@ -45,7 +45,7 @@ public class BlockHeaderFuzzInput implements SimpleOffsetSerializable, SSZContai
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + block.getSSZFieldCount();
+    return 2;
   }
 
   @Override

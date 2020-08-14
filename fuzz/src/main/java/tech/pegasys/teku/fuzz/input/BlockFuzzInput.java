@@ -42,7 +42,7 @@ public class BlockFuzzInput implements SimpleOffsetSerializable, SSZContainer {
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + signed_block.getSSZFieldCount();
+    return 2;
   }
 
   @Override

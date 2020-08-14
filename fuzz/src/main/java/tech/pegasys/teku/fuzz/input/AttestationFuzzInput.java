@@ -48,7 +48,7 @@ public class AttestationFuzzInput implements SimpleOffsetSerializable, SSZContai
 
   @Override
   public int getSSZFieldCount() {
-    return state.getSSZFieldCount() + attestation.getSSZFieldCount();
+    return 2;
   }
 
   @Override
