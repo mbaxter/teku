@@ -24,7 +24,11 @@ import tech.pegasys.teku.ssz.SSZTypes.Bitvector;
 import tech.pegasys.teku.ssz.SSZTypes.SSZMutableList;
 import tech.pegasys.teku.ssz.SSZTypes.SSZMutableVector;
 
-public interface MutableBeaconState extends BeaconState {
+public interface MutableBeaconState<
+        BeaconStateForkT extends BeaconState<BeaconStateForkT, MutableBeaconStateForkT>,
+        MutableBeaconStateForkT extends
+            MutableBeaconState<BeaconStateForkT, MutableBeaconStateForkT>>
+    extends BeaconState<BeaconStateForkT, MutableBeaconStateForkT> {
 
   // Versioning
   void setGenesis_time(UInt64 genesis_time);

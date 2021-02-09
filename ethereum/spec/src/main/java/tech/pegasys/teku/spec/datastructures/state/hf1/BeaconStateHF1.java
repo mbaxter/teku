@@ -20,13 +20,13 @@ import tech.pegasys.teku.ssz.SSZTypes.SSZList;
 import tech.pegasys.teku.ssz.SSZTypes.SSZVector;
 import tech.pegasys.teku.ssz.backing.view.SszPrimitives;
 
-public interface BeaconStateHF1 extends BeaconState {
+public interface BeaconStateHF1 extends BeaconState<BeaconStateHF1, MutableBeaconStateHF1> {
 
   SSZList<SSZVector<SszPrimitives.SszBit>> getPreviousEpochParticipation();
 
   SSZList<SSZVector<SszPrimitives.SszBit>> getCurrentEpochParticipation();
 
-  BeaconState updatedHF1(final Consumer<MutableBeaconStateHF1> updater);
+  BeaconStateHF1 updated(final Consumer<MutableBeaconStateHF1> updater);
 
   @Override
   default Optional<BeaconStateHF1> toHF1Version() {
