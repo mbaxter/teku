@@ -22,7 +22,7 @@ import tech.pegasys.teku.spec.statetransition.genesis.EpochProcessorGenesis;
 public class EpochProcessorHF1 extends EpochProcessorGenesis implements EpochProcessor {
 
   @Override
-  public BeaconState processEpoch(final BeaconState preState) {
+  public BeaconState<?> processEpoch(final BeaconState<?> preState) {
     final BeaconStateHF1 versionedPreState =
         preState
             .toHF1Version()
@@ -30,7 +30,7 @@ public class EpochProcessorHF1 extends EpochProcessorGenesis implements EpochPro
     return processEpoch(versionedPreState);
   }
 
-  protected BeaconState processEpoch(final BeaconStateHF1 preState) {
+  protected BeaconStateHF1 processEpoch(final BeaconStateHF1 preState) {
     return preState.updatedHF1(
         state -> {
           // TODO other methods etc

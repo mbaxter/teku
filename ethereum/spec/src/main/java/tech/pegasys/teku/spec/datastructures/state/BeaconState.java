@@ -30,7 +30,8 @@ import tech.pegasys.teku.ssz.SSZTypes.SSZList;
 import tech.pegasys.teku.ssz.SSZTypes.SSZVector;
 import tech.pegasys.teku.ssz.backing.SszContainer;
 
-public interface BeaconState extends SszContainer {
+public interface BeaconState<MutableBeaconStateT extends MutableBeaconState<MutableBeaconStateT>>
+    extends SszContainer {
 
   // Versioning
   UInt64 getGenesis_time();
@@ -79,7 +80,7 @@ public interface BeaconState extends SszContainer {
   Checkpoint getFinalized_checkpoint();
 
   // Update
-  BeaconState updated(Consumer<MutableBeaconState> updater);
+  BeaconState<MutableBeaconStateT> updated(Consumer<MutableBeaconStateT> updater);
 
   // Version-specific casting
   default Optional<BeaconStateGenesis> toGenesisVersion() {

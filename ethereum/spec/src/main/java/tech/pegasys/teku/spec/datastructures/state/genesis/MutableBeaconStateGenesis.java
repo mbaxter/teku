@@ -17,7 +17,8 @@ import tech.pegasys.teku.datastructures.state.PendingAttestation;
 import tech.pegasys.teku.spec.datastructures.state.MutableBeaconState;
 import tech.pegasys.teku.ssz.SSZTypes.SSZMutableList;
 
-public interface MutableBeaconStateGenesis extends MutableBeaconState, BeaconStateGenesis {
+public interface MutableBeaconStateGenesis
+    extends MutableBeaconState<MutableBeaconStateGenesis>, BeaconStateGenesis {
 
   @Override
   SSZMutableList<PendingAttestation> getPrevious_epoch_attestations();

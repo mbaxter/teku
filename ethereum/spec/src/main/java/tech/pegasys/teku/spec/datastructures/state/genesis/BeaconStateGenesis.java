@@ -19,13 +19,14 @@ import tech.pegasys.teku.datastructures.state.PendingAttestation;
 import tech.pegasys.teku.spec.datastructures.state.BeaconState;
 import tech.pegasys.teku.ssz.SSZTypes.SSZList;
 
-public interface BeaconStateGenesis extends BeaconState {
+public interface BeaconStateGenesis extends BeaconState<MutableBeaconStateGenesis> {
 
   SSZList<PendingAttestation> getPrevious_epoch_attestations();
 
   SSZList<PendingAttestation> getCurrent_epoch_attestations();
 
-  BeaconState updatedGenesis(final Consumer<MutableBeaconStateGenesis> updater);
+  @Override
+  BeaconStateGenesis updated(final Consumer<MutableBeaconStateGenesis> updater);
 
   @Override
   default Optional<BeaconStateGenesis> toGenesisVersion() {

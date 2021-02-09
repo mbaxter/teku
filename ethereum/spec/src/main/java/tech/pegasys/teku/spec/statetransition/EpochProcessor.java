@@ -17,5 +17,5 @@ import tech.pegasys.teku.spec.datastructures.state.BeaconState;
 
 public interface EpochProcessor {
 
-  BeaconState processEpoch(final BeaconState preState);
+  BeaconState<?> processEpoch(final BeaconState<?> preState);
 }
