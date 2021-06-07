@@ -21,7 +21,7 @@ import tech.pegasys.teku.test.acceptance.dsl.AcceptanceTestBase;
 import tech.pegasys.teku.test.acceptance.dsl.TekuNode;
 import tech.pegasys.teku.test.acceptance.dsl.TekuValidatorNode;
 
-public class MultiNodeAltairAcceptanceTest extends AcceptanceTestBase {
+public class SyncCommitteeGossipAcceptanceTest extends AcceptanceTestBase {
   static final int NODE_VALIDATORS = 8;
 
   private final SystemTimeProvider timeProvider = new SystemTimeProvider();
@@ -34,7 +34,8 @@ public class MultiNodeAltairAcceptanceTest extends AcceptanceTestBase {
     final int genesisTime = timeProvider.getTimeInSeconds().plus(5).intValue();
     primaryNode =
         createTekuNode(
-            config -> configureNode(config, genesisTime).withInteropValidators(0, NODE_VALIDATORS));
+            config ->
+                configureNode(config, genesisTime).withInteropValidators(0, NODE_VALIDATORS / 2));
     secondaryNode =
         createTekuNode(
             config ->
@@ -47,7 +48,7 @@ public class MultiNodeAltairAcceptanceTest extends AcceptanceTestBase {
                 config
                     .withNetwork("minimal")
                     .withAltairEpoch(UInt64.ZERO)
-                    .withInteropValidators(NODE_VALIDATORS, NODE_VALIDATORS)
+                    .withInteropValidators(NODE_VALIDATORS / 2, NODE_VALIDATORS / 2)
                     .withBeaconNode(secondaryNode));
   }
 
@@ -56,7 +57,8 @@ public class MultiNodeAltairAcceptanceTest extends AcceptanceTestBase {
     primaryNode.start();
     secondaryNode.start();
     validatorClient.start();
-    secondaryNode.waitForFullSyncCommitteeAggregate();
+    // Allow some bits to be unset for greater fault tolerance
+    secondaryNode.waitForFullSyncCommitteeAggregate(.9);
   }
 
   private TekuNode.Config configureNode(final TekuNode.Config node, final int genesisTime) {
